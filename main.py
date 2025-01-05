@@ -1,9 +1,9 @@
 import os
 import logging
-from src.preprocessing import (
-    load_field_survey,
-    clean_field_survey,
-    report_missing_values
+from src.field_survey_geojson_utils import (
+    load_field_survey_geojson,
+    clean_field_survey_geojson,
+    report_field_survey_geojson_missing_values
 )
 from src.visualization import (
     plot_field_survey_map,
@@ -12,21 +12,24 @@ from src.visualization import (
     plot_density
 )
 from src.point_cloud_utils import (
-    visualize_raster_images,
     visualize_point_cloud
 )
+from src.orthophotos_utils import (
+    visualize_raster_images
+)
+
 
 # Configure logging
 LOGS_DIR = "./logs"
-os.makedirs(LOGS_DIR, exist_ok=True)  # Ensure the logs directory exists
+os.makedirs(LOGS_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOGS_DIR, "workflow.log")
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO,
     handlers=[
-        logging.StreamHandler(),  # Log to console
-        logging.FileHandler(LOG_FILE, mode="w")  # Log to file
+        logging.StreamHandler(), 
+        logging.FileHandler(LOG_FILE, mode="w") 
     ]
 )
 logger = logging.getLogger(__name__)
@@ -61,15 +64,15 @@ def main():
 
         # Step 1: Load and preprocess field survey data
         logger.info("Loading field survey data...")
-        field_survey = load_field_survey(FIELD_SURVEY_PATH)
+        field_survey = load_field_survey_geojson(FIELD_SURVEY_PATH)
 
         logger.info("Cleaning field survey data...")
-        field_survey_cleaned = clean_field_survey(field_survey, DROP_COLUMNS)
+        field_survey_cleaned = clean_field_survey_geojson(field_survey, DROP_COLUMNS)
 
         logger.info("Reporting missing values...")
-        missing_values = report_missing_values(field_survey_cleaned)
+        missing_values = report_field_survey_geojson_missing_values(field_survey_cleaned)
 
-        # Save missing values report (optional)
+        # Save missing values report
         missing_values_file = os.path.join(PLOTS_DIR, "missing_values.csv")
         missing_values.to_csv(missing_values_file, index=False)
         logger.info(f"Missing values report saved to {missing_values_file}")

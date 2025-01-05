@@ -9,7 +9,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Load field survey data
-def load_field_survey(path):
+def load_field_survey_geojson(path):
     """
     Loads the field survey data from the specified path.
 
@@ -25,7 +25,7 @@ def load_field_survey(path):
     return field_survey
 
 # Drop unnecessary columns
-def clean_field_survey(field_survey, drop_columns=None):
+def clean_field_survey_geojson(field_survey, drop_columns=None):
     """
     Cleans the field survey data by dropping unnecessary columns.
 
@@ -42,7 +42,7 @@ def clean_field_survey(field_survey, drop_columns=None):
     return field_survey
 
 # Check and report missing values
-def report_missing_values(df):
+def report_field_survey_geojson_missing_values(df):
     """
     Reports missing values in the data.
 

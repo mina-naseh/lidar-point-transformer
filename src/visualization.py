@@ -152,3 +152,55 @@ def plot_density(df, columns, save_path=None) -> None:
         plt.show()
 
     plt.close()
+
+
+def plot_point_cloud(points, title="Point Cloud", save_path=None):
+    """
+    Visualizes a 3D point cloud.
+    """
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection="3d")
+    scatter = ax.scatter(points[:, 0], points[:, 1], points[:, 2], c=points[:, 2], s=1, cmap="viridis")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    plt.title(title)
+
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+        logger.info(f"{title} plot saved to {save_path}")
+    else:
+        plt.show()
+
+    plt.close()
+
+
+def plot_before_after_filtering(original_points, filtered_points, save_path=None):
+    """
+    Plots the original and filtered point clouds side by side for comparison.
+    """
+    fig = plt.figure(figsize=(15, 7))
+
+    ax1 = fig.add_subplot(121, projection="3d")
+    ax1.scatter(original_points[:, 0], original_points[:, 1], original_points[:, 2], c=original_points[:, 2], s=1, cmap="viridis")
+    ax1.set_title("Before Filtering")
+    ax1.set_xlabel("X")
+    ax1.set_ylabel("Y")
+    ax1.set_zlabel("Z")
+
+    ax2 = fig.add_subplot(122, projection="3d")
+    ax2.scatter(filtered_points[:, 0], filtered_points[:, 1], filtered_points[:, 2], c=filtered_points[:, 2], s=1, cmap="viridis")
+    ax2.set_title("After Filtering")
+    ax2.set_xlabel("X")
+    ax2.set_ylabel("Y")
+    ax2.set_zlabel("Z")
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+        logger.info(f"Before/After filtering plot saved to {save_path}")
+    else:
+        plt.show()
+
+    plt.close()

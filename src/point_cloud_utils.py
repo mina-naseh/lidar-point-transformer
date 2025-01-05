@@ -1,9 +1,9 @@
 import os
 import matplotlib.pyplot as plt
 import numpy as np
-import rasterio
 import laspy
 import logging
+from sklearn.cluster import DBSCAN
 
 # Configure logging
 logging.basicConfig(
@@ -11,39 +11,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-def visualize_raster_images(tif_dir, num_plots=10, save_path=None):
-    """
-    Visualizes raster images from a specified directory.
-
-    Parameters:
-    - tif_dir (str): Path to the directory containing raster files (.tif).
-    - num_plots (int): Number of plots to visualize. Default is 10.
-    - save_path (str, optional): Path to save the combined plot as an image file. Default is None.
-
-    Returns:
-    - None: Saves or displays the raster visualization.
-    """
-    tiff_files = [os.path.join(tif_dir, f'plot_{i:02d}.tif') for i in range(1, num_plots + 1)]
-    fig, axes = plt.subplots(2, 5, figsize=(20, 10))
-    axes = axes.flatten()
-    
-    for i, tiff_file in enumerate(tiff_files):
-        with rasterio.open(tiff_file) as src:
-            img = src.read(1)
-            axes[i].imshow(img, cmap='gist_earth')
-            axes[i].set_title(f'Plot {i + 1}')
-            axes[i].axis('off')
-
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, bbox_inches='tight')
-        logger.info(f"Raster images saved to {save_path}")
-    else:
-        plt.show()
-
-    plt.close()
 
 
 def visualize_point_cloud(las_dir, num_plots=10, height_threshold=None, save_path=None):
@@ -89,3 +56,18 @@ def visualize_point_cloud(las_dir, num_plots=10, height_threshold=None, save_pat
         plt.show()
 
     plt.close()
+
+
+def filter_points_by_height(points, height_threshold):
+    """
+    Filters points based on a height threshold.
+    """
+    return points[points[:, 2] >= height_threshold]
+
+def remove_noise_with_dbscan(points, eps=1.0, min_samples=5):
+    """
+    Removes noise from point clouds using DBSCAN clustering.
+    """
+    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(points)
+    labels = clustering.labels_
+    return points[labels >= 0]
