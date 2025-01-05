@@ -7,7 +7,7 @@ import seaborn as sns
 # Use the global logging configuration from main
 logger = logging.getLogger(__name__)
 
-def plot_field_survey_map(gdf, species_col='species', save_path=None) -> None:
+def plot_geojson_species_map(gdf, species_col='species', save_path=None) -> None:
     """
     Plots a geographic map of trees colored by species and optionally saves the plot.
 
@@ -19,6 +19,10 @@ def plot_field_survey_map(gdf, species_col='species', save_path=None) -> None:
     Returns:
     - None: Saves or displays the plot.
     """
+    if gdf.empty:
+        logger.warning("GeoDataFrame is empty. Skipping geographic map plotting.")
+        return
+
     gdf = gdf.to_crs(epsg=4326)  # Convert to WGS84
     ax = gdf.plot(column=species_col, cmap='viridis', legend=True, figsize=(15, 15), markersize=1)
     plt.title('Geographic plot of trees, colored by species', fontsize=21)
@@ -39,7 +43,7 @@ def plot_field_survey_map(gdf, species_col='species', save_path=None) -> None:
 
     plt.close()
 
-def plot_individual_rectangles(gdf, plot_col='plot', save_path=None) -> None:
+def plot_field_survey_subplots(gdf, plot_col='plot', save_path=None) -> None:
     """
     Creates a subplot for each unique plot ID, showing the geographic distribution of trees,
     and optionally saves the combined plot.
@@ -52,9 +56,14 @@ def plot_individual_rectangles(gdf, plot_col='plot', save_path=None) -> None:
     Returns:
     - None: Saves or displays the plot.
     """
-    unique_plots = sorted(gdf[plot_col].unique())
-    plot_labels = {plot_id: f"Plot {letter}" for plot_id, letter in zip(unique_plots, string.ascii_uppercase)}
+    if gdf.empty:
+        logger.warning("GeoDataFrame is empty. Skipping individual rectangles plotting.")
+        return
 
+    unique_plots = sorted(gdf[plot_col].unique())
+    logger.info(f"Creating subplots for {len(unique_plots)} unique plots.")
+
+    plot_labels = {plot_id: f"Plot {letter}" for plot_id, letter in zip(unique_plots, string.ascii_uppercase)}
     fig, axes = plt.subplots(2, 5, figsize=(20, 10), sharex=False, sharey=False)
     axes = axes.flatten()
 
@@ -78,7 +87,7 @@ def plot_individual_rectangles(gdf, plot_col='plot', save_path=None) -> None:
 
     plt.close()
 
-def plot_species_counts(df, species_col, save_path=None) -> None:
+def plot_species_bar_chart(df, species_col, save_path=None) -> None:
     """
     Creates a bar plot for species counts.
 
@@ -96,6 +105,7 @@ def plot_species_counts(df, species_col, save_path=None) -> None:
 
     species_counts = df[species_col].value_counts().reset_index()
     species_counts.columns = [species_col, 'Count']
+    logger.info(f"Plotting bar chart for {len(species_counts)} species.")
 
     plt.figure(figsize=(15, 6))
     sns.barplot(
@@ -103,7 +113,7 @@ def plot_species_counts(df, species_col, save_path=None) -> None:
         y=species_col,
         data=species_counts,
         hue=species_col,
-        palette="viridis"    
+        palette="viridis"
     )
     plt.legend([], [], frameon=False)
     plt.title("Species Count", fontsize=16)
@@ -119,7 +129,7 @@ def plot_species_counts(df, species_col, save_path=None) -> None:
 
     plt.close()
 
-def plot_density(df, columns, save_path=None) -> None:
+def plot_field_density(df, columns, save_path=None) -> None:
     """
     Creates density plots for specified columns.
 
@@ -135,6 +145,7 @@ def plot_density(df, columns, save_path=None) -> None:
         logger.warning("The DataFrame is empty. Skipping density plot.")
         return
 
+    logger.info(f"Creating density plots for {len(columns)} columns: {columns}.")
     plt.figure(figsize=(15, len(columns) * 3))
     for i, col in enumerate(columns, 1):
         plt.subplot(1, len(columns), i)
@@ -148,58 +159,6 @@ def plot_density(df, columns, save_path=None) -> None:
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
         logger.info(f"Density plots saved to {save_path}")
-    else:
-        plt.show()
-
-    plt.close()
-
-
-def plot_point_cloud(points, title="Point Cloud", save_path=None):
-    """
-    Visualizes a 3D point cloud.
-    """
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection="3d")
-    scatter = ax.scatter(points[:, 0], points[:, 1], points[:, 2], c=points[:, 2], s=1, cmap="viridis")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    plt.title(title)
-
-    if save_path:
-        plt.savefig(save_path, bbox_inches="tight")
-        logger.info(f"{title} plot saved to {save_path}")
-    else:
-        plt.show()
-
-    plt.close()
-
-
-def plot_before_after_filtering(original_points, filtered_points, save_path=None):
-    """
-    Plots the original and filtered point clouds side by side for comparison.
-    """
-    fig = plt.figure(figsize=(15, 7))
-
-    ax1 = fig.add_subplot(121, projection="3d")
-    ax1.scatter(original_points[:, 0], original_points[:, 1], original_points[:, 2], c=original_points[:, 2], s=1, cmap="viridis")
-    ax1.set_title("Before Filtering")
-    ax1.set_xlabel("X")
-    ax1.set_ylabel("Y")
-    ax1.set_zlabel("Z")
-
-    ax2 = fig.add_subplot(122, projection="3d")
-    ax2.scatter(filtered_points[:, 0], filtered_points[:, 1], filtered_points[:, 2], c=filtered_points[:, 2], s=1, cmap="viridis")
-    ax2.set_title("After Filtering")
-    ax2.set_xlabel("X")
-    ax2.set_ylabel("Y")
-    ax2.set_zlabel("Z")
-
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path, bbox_inches="tight")
-        logger.info(f"Before/After filtering plot saved to {save_path}")
     else:
         plt.show()
 

@@ -42,15 +42,16 @@ def clean_field_survey_geojson(field_survey, drop_columns=None):
     return field_survey
 
 # Check and report missing values
-def report_field_survey_geojson_missing_values(df):
+def report_field_survey_geojson_missing_values(df, save_path=None):
     """
-    Reports missing values in the data.
+    Reports missing values in the data and optionally saves the report to a file.
 
     Parameters:
     - df (DataFrame): The data to analyze.
+    - save_path (str, optional): Path to save the missing values report as a CSV file. Default is None.
 
     Returns:
-    - None: Prints a summary of missing values.
+    - DataFrame: Summary of missing values.
     """
     logger.info("Checking for missing values.")
     missing_values_table = df.isnull().sum().reset_index()
@@ -61,4 +62,10 @@ def report_field_survey_geojson_missing_values(df):
     logger.info("Missing values summary:")
     logger.info(f"\n{missing_values_table}")
 
+    # Save the missing values report if a path is provided
+    if save_path:
+        missing_values_table.to_csv(save_path, index=False)
+        logger.info(f"Missing values report saved to {save_path}")
+
     return missing_values_table
+

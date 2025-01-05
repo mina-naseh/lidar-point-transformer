@@ -2,7 +2,6 @@ import os
 import matplotlib.pyplot as plt
 import rasterio
 import logging
-from sklearn.cluster import DBSCAN
 
 # Configure logging
 logging.basicConfig(
