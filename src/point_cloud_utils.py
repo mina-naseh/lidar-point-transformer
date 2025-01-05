@@ -34,20 +34,33 @@ def load_las_file(file_path):
         logger.error(f"Error loading LAS file {file_path}: {e}")
         return np.array([])
 
-def filter_points_by_height(points, height_threshold):
+
+def filter_points_by_height(points, height_threshold=None, percentile=None):
     """
-    Filters points based on a height threshold.
+    Filters points based on a height threshold or a percentile of Z-values.
 
     Parameters:
     - points (numpy.ndarray): Point cloud data (X, Y, Z).
-    - height_threshold (float): Minimum Z value to retain points.
+    - height_threshold (float, optional): Minimum Z value to retain points.
+    - percentile (float, optional): Percentile of Z-values to compute threshold. If provided, overrides height_threshold.
 
     Returns:
     - numpy.ndarray: Filtered point cloud data.
     """
-    filtered_points = points[points[:, 2] >= height_threshold]
+    if percentile is not None:
+        z_threshold = np.percentile(points[:, 2], percentile)
+        logger.info(f"Using percentile-based height threshold: {z_threshold:.2f}")
+    elif height_threshold is not None:
+        z_threshold = height_threshold
+        logger.info(f"Using fixed height threshold: {z_threshold:.2f}")
+    else:
+        logger.warning("No height threshold or percentile provided. Returning all points.")
+        return points
+
+    filtered_points = points[points[:, 2] >= z_threshold]
     logger.info(f"Filtered points: {filtered_points.shape[0]} retained out of {points.shape[0]}")
     return filtered_points
+
 
 def remove_noise_with_dbscan(points, eps=1.0, min_samples=5):
     """
@@ -139,38 +152,46 @@ def visualize_filtered_point_cloud(file_path, height_threshold=None, apply_dbsca
     visualize_point_cloud(points, title=f"Filtered Point Cloud - {os.path.basename(file_path)}", save_path=save_path)
 
 def process_and_visualize_multiple_point_clouds(
-    las_dir, num_plots=None, height_threshold=None, apply_dbscan=False, eps=1.0, min_samples=5, save_dir=None
+    las_dir, save_dir=None, apply_dbscan=False, eps=1.0, min_samples=5, percentile=None
 ):
     """
-    Processes and visualizes multiple LAS files.
+    Processes and visualizes multiple LAS files with optional filtering and DBSCAN.
 
     Parameters:
     - las_dir (str): Directory containing LAS files.
-    - num_plots (int, optional): Number of LAS files to process. If None, processes all. Default is None.
-    - height_threshold (float, optional): Minimum height threshold for filtering. Default is None.
-    - apply_dbscan (bool): Whether to apply DBSCAN clustering. Default is False.
-    - eps (float): DBSCAN clustering distance threshold. Default is 1.0.
-    - min_samples (int): DBSCAN clustering minimum samples. Default is 5.
-    - save_dir (str, optional): Directory to save plots. Default is None.
+    - save_dir (str, optional): Directory to save plots.
+    - apply_dbscan (bool): Whether to apply DBSCAN clustering.
+    - eps (float): Maximum distance for DBSCAN clustering.
+    - min_samples (int): Minimum samples for DBSCAN clustering.
+    - percentile (float, optional): Percentile of Z-values to compute threshold.
 
     Returns:
-    - None
+    - None: Displays or saves the plots.
     """
-    las_files = sorted([os.path.join(las_dir, f) for f in os.listdir(las_dir) if f.endswith(".las")])
-    if num_plots:
-        las_files = las_files[:num_plots]
-
+    # Collect all LAS files from the directory
+    las_files = [os.path.join(las_dir, f) for f in os.listdir(las_dir) if f.endswith(".las")]
     if not las_files:
-        logger.warning("No LAS files found in the specified directory.")
+        logger.warning(f"No LAS files found in directory: {las_dir}")
         return
 
-    for i, file_path in enumerate(las_files):
-        save_path = os.path.join(save_dir, f"plot_{i + 1}.png") if save_dir else None
-        visualize_filtered_point_cloud(
-            file_path,
-            height_threshold=height_threshold,
-            apply_dbscan=apply_dbscan,
-            eps=eps,
-            min_samples=min_samples,
-            save_path=save_path
-        )
+    # Process each LAS file
+    for idx, file_path in enumerate(las_files, start=1):
+        points = load_las_file(file_path)
+        if points.size == 0:
+            logger.warning(f"File {file_path} is empty. Skipping...")
+            continue
+
+        # Apply percentile-based Z-value threshold if specified
+        if percentile is not None:
+            z_threshold = np.percentile(points[:, 2], percentile)
+            logger.info(f"Using {percentile}th percentile as Z-value threshold: {z_threshold:.3f}")
+            points = filter_points_by_height(points, z_threshold)
+
+        # Apply DBSCAN clustering if enabled
+        if apply_dbscan:
+            points = remove_noise_with_dbscan(points, eps=eps, min_samples=min_samples)
+
+        # Visualize and optionally save the filtered point cloud
+        plot_title = f"Filtered Point Cloud - {os.path.basename(file_path)}"
+        save_path = os.path.join(save_dir, f"plot_{idx}.png") if save_dir else None
+        visualize_point_cloud(points, title=plot_title, save_path=save_path)

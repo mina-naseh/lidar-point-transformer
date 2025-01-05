@@ -133,12 +133,11 @@ def main():
         logger.info("Processing and visualizing point cloud data...")
         process_and_visualize_multiple_point_clouds(
             las_dir=LAS_DIR,
-            num_plots=10, 
-            height_threshold=15,
+            save_dir=PLOTS_DIR,
             apply_dbscan=True,
             eps=1.0,
             min_samples=5,
-            save_dir=PLOTS_DIR
+            percentile=5  # Use the 5th percentile as the threshold
         )
 
         logger.info("Workflow complete!")
