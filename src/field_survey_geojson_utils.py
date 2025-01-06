@@ -1,5 +1,6 @@
 import geopandas as gpd
 import logging
+import numpy as np
 
 # Configure logging
 logging.basicConfig(
@@ -69,3 +70,55 @@ def report_field_survey_geojson_missing_values(df, save_path=None):
 
     return missing_values_table
 
+
+def get_plot_ground_truth(field_survey, plot_id):
+    """
+    Extracts ground truth data for a specific plot.
+
+    Parameters:
+    - field_survey (GeoDataFrame): The field survey data.
+    - plot_id (int): The ID of the plot.
+
+    Returns:
+    - np.ndarray: Ground truth tree coordinates and heights for the plot.
+    """
+    logger.info(f"Extracting ground truth data for plot {plot_id}.")
+    plot_data = field_survey[field_survey["plot"] == plot_id]
+
+    # Ensure only trees with valid coordinates and heights are included
+    ground_truth = plot_data[["geometry", "height"]].dropna()
+    ground_truth_array = ground_truth.apply(
+        lambda row: [row.geometry.x, row.geometry.y, row.height], axis=1
+    ).to_list()
+
+    logger.info(f"Found {len(ground_truth_array)} ground truth trees for plot {plot_id}.")
+    return np.array(ground_truth_array)
+
+
+def process_field_survey_geojson(
+    path, drop_columns=None, missing_values_report_path=None
+):
+    """
+    Loads, cleans, and prepares the field survey data.
+
+    Parameters:
+    - path (str): Path to the GeoJSON file.
+    - drop_columns (list, optional): Columns to drop from the data.
+    - missing_values_report_path (str, optional): Path to save missing values report.
+
+    Returns:
+    - GeoDataFrame: Cleaned and processed field survey data.
+    """
+    field_survey = load_field_survey_geojson(path)
+
+    # Report missing values
+    if missing_values_report_path:
+        report_field_survey_geojson_missing_values(
+            field_survey, save_path=missing_values_report_path
+        )
+
+    # Clean field survey data
+    if drop_columns:
+        field_survey = clean_field_survey_geojson(field_survey, drop_columns)
+
+    return field_survey

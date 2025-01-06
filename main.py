@@ -1,9 +1,12 @@
 import os
 import logging
+import geopandas as gpd
 from src.field_survey_geojson_utils import (
     load_field_survey_geojson,
     clean_field_survey_geojson,
-    report_field_survey_geojson_missing_values
+    report_field_survey_geojson_missing_values,
+    process_field_survey_geojson,
+    get_plot_ground_truth,
 )
 from src.field_survey_visualization import (
     plot_geojson_species_map,
@@ -12,7 +15,12 @@ from src.field_survey_visualization import (
     plot_field_density
 )
 from src.point_cloud_utils import (
-    process_and_visualize_multiple_point_clouds
+    process_and_visualize_multiple_point_clouds,
+    normalize_cloud_height, 
+    local_maxima_filter, 
+    process_point_cloud_with_lmf,
+    process_and_visualize_multiple_point_clouds_with_lmf,
+    process_all_las_files_with_ground_truth
 )
 from src.orthophotos_utils import (
     visualize_raster_images
@@ -36,7 +44,8 @@ logger = logging.getLogger(__name__)
 
 # --- Constants ---
 DATA_DIR = "./data"
-PLOTS_DIR = "./plots"
+PLOTS_DIR = "./visualizations"
+RESULTS_DIR = "./results"
 FIELD_SURVEY_PATH = os.path.join(DATA_DIR, "field_survey.geojson")
 TIF_DIR = os.path.join(DATA_DIR, "ortho")
 LAS_DIR = os.path.join(DATA_DIR, "als")
@@ -44,6 +53,7 @@ DROP_COLUMNS = ["tree_no"]  # Columns to drop from field survey
 
 # Ensure Output Directories Exist
 os.makedirs(PLOTS_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
 # --- Utility Functions ---
@@ -82,42 +92,37 @@ def main():
 
         # --- Step 1: Load and Preprocess Field Survey Data ---
         logger.info("Loading field survey data...")
-        field_survey = load_field_survey_geojson(FIELD_SURVEY_PATH)
-
-        logger.info("Cleaning field survey data...")
-        field_survey_cleaned = clean_field_survey_geojson(field_survey, DROP_COLUMNS)
-
-        logger.info("Reporting missing values...")
-        missing_values_log_file = os.path.join(LOGS_DIR, "missing_values.csv")
-        report_field_survey_geojson_missing_values(
-            field_survey_cleaned, save_path=missing_values_log_file
+        field_survey = process_field_survey_geojson(
+            path=FIELD_SURVEY_PATH,
+            drop_columns=DROP_COLUMNS,
+            missing_values_report_path=os.path.join(LOGS_DIR, "missing_values.csv"),
         )
 
         # --- Step 2: Visualize Field Survey ---
         logger.info("Plotting species count...")
         plot_species_bar_chart(
-            field_survey_cleaned,
+            field_survey,
             species_col="species",
             save_path=os.path.join(PLOTS_DIR, "species_counts.png")
         )
 
         logger.info("Plotting density plots...")
         plot_field_density(
-            field_survey_cleaned,
+            field_survey,
             columns=["d1", "d2", "dbh"],
             save_path=os.path.join(PLOTS_DIR, "density_plots.png")
         )
 
         logger.info("Plotting geographic map of species...")
         plot_geojson_species_map(
-            field_survey_cleaned,
+            field_survey,
             species_col="species",
             save_path=os.path.join(PLOTS_DIR, "field_survey_map.png")
         )
 
         logger.info("Plotting individual rectangles for plots...")
         plot_field_survey_subplots(
-            field_survey_cleaned,
+            field_survey,
             plot_col="plot",
             save_path=os.path.join(PLOTS_DIR, "individual_rectangles.png")
         )
@@ -139,6 +144,42 @@ def main():
             min_samples=5,
             percentile=5  # Use the 5th percentile as the threshold
         )
+
+        # --- Step 5: Process Point Cloud Data with Local Maxima Filtering ---
+        logger.info("Processing and visualizing point cloud data with Local Maxima Filtering...")
+        process_and_visualize_multiple_point_clouds_with_lmf(
+            las_dir=LAS_DIR,
+            save_dir=RESULTS_DIR,
+            apply_dbscan=True,  # Use DBSCAN for noise removal
+            eps=1.0,            # DBSCAN epsilon value
+            min_samples=5,      # DBSCAN minimum samples
+            window_size=2.0,    # LMF window size
+            height_threshold=3.0  # LMF height threshold
+        )
+
+        # --- Step 6: Match Detected Trees with Ground Truth and Calculate Metrics ---
+        logger.info("Loading ground truth data...")
+        ground_truth_data = gpd.read_file(FIELD_SURVEY_PATH)
+
+        logger.info("Processing LAS files with ground truth matching and calculating metrics...")
+        metrics_summary = process_all_las_files_with_ground_truth(
+            las_dir=LAS_DIR,
+            ground_truth_data=ground_truth_data,
+            save_dir=RESULTS_DIR,
+            max_distance=5.0,          # Maximum distance for matching
+            max_height_difference=3.0, # Maximum height difference for matching
+            window_size=2.0,           # Window size for LMF
+            height_threshold=3.0       # Height threshold for LMF
+        )
+
+        # Save and log metrics
+        if not metrics_summary.empty:
+            metrics_summary_path = os.path.join(RESULTS_DIR, "detection_metrics_summary.csv")
+            metrics_summary.to_csv(metrics_summary_path, index=False)
+            logger.info(f"Metrics summary saved to {metrics_summary_path}.")
+            logger.info(metrics_summary)
+        else:
+            logger.warning("No metrics were calculated.")
 
         logger.info("Workflow complete!")
 
