@@ -20,10 +20,15 @@ def load_field_survey_geojson(path):
     Returns:
     - GeoDataFrame: The loaded field survey data.
     """
-    logger.info(f"Loading field survey data from {path}")
-    field_survey = gpd.read_file(path)
-    logger.info(f"Loaded {len(field_survey)} rows of data.")
-    return field_survey
+    try:
+        logger.info(f"Loading field survey data from {path}")
+        field_survey = gpd.read_file(path)
+        logger.info(f"Loaded {len(field_survey)} rows of data.")
+        return field_survey
+    except Exception as e:
+        logger.error(f"Failed to load GeoJSON file: {e}")
+        return gpd.GeoDataFrame()  # Return an empty GeoDataFrame for robustness
+
 
 # Drop unnecessary columns
 def clean_field_survey_geojson(field_survey, drop_columns=None):
@@ -39,8 +44,12 @@ def clean_field_survey_geojson(field_survey, drop_columns=None):
     """
     if drop_columns:
         logger.info(f"Dropping columns: {drop_columns}")
-        field_survey = field_survey.drop(columns=drop_columns)
+        try:
+            field_survey.drop(columns=drop_columns, inplace=True)
+        except KeyError as e:
+            logger.warning(f"Some columns to drop were not found: {e}")
     return field_survey
+
 
 # Check and report missing values
 def report_field_survey_geojson_missing_values(df, save_path=None):
@@ -65,12 +74,16 @@ def report_field_survey_geojson_missing_values(df, save_path=None):
 
     # Save the missing values report if a path is provided
     if save_path:
-        missing_values_table.to_csv(save_path, index=False)
-        logger.info(f"Missing values report saved to {save_path}")
+        try:
+            missing_values_table.to_csv(save_path, index=False)
+            logger.info(f"Missing values report saved to {save_path}")
+        except Exception as e:
+            logger.error(f"Failed to save missing values report: {e}")
 
     return missing_values_table
 
 
+# Extract ground truth data for a specific plot
 def get_plot_ground_truth(field_survey, plot_id):
     """
     Extracts ground truth data for a specific plot.
@@ -83,6 +96,10 @@ def get_plot_ground_truth(field_survey, plot_id):
     - np.ndarray: Ground truth tree coordinates and heights for the plot.
     """
     logger.info(f"Extracting ground truth data for plot {plot_id}.")
+    if plot_id not in field_survey["plot"].unique():
+        logger.warning(f"Plot ID {plot_id} not found in the dataset.")
+        return np.array([])
+
     plot_data = field_survey[field_survey["plot"] == plot_id]
 
     # Ensure only trees with valid coordinates and heights are included
@@ -95,6 +112,7 @@ def get_plot_ground_truth(field_survey, plot_id):
     return np.array(ground_truth_array)
 
 
+# Load, clean, and prepare the field survey data
 def process_field_survey_geojson(
     path, drop_columns=None, missing_values_report_path=None
 ):
@@ -110,6 +128,9 @@ def process_field_survey_geojson(
     - GeoDataFrame: Cleaned and processed field survey data.
     """
     field_survey = load_field_survey_geojson(path)
+    if field_survey.empty:
+        logger.error("Field survey data is empty after loading. Exiting process.")
+        return field_survey
 
     # Report missing values
     if missing_values_report_path:
