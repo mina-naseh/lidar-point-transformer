@@ -151,45 +151,46 @@ def main():
         # except Exception as e:
         #     logger.error(f"Error during point cloud processing: {e}", exc_info=True)
 
-        # --- Step 5: Process Point Cloud Data with LMF ---
-        try:
-            logger.info("Processing and visualizing point cloud data with Local Maxima Filtering...")
-            process_and_visualize_multiple_point_clouds_with_lmf(
-                las_dir=LAS_DIR,
-                save_dir=RESULTS_DIR,
-                apply_dbscan=True,
-                eps=1.0,
-                min_samples=5,
-                window_size=2,
-                height_threshold=1
-            )
-        except Exception as e:
-            logger.error(f"Error during LMF processing: {e}", exc_info=True)
+        # # --- Step 5: Process Point Cloud Data with LMF ---
+        # try:
+        #     logger.info("Processing and visualizing point cloud data with Local Maxima Filtering...")
+        #     process_and_visualize_multiple_point_clouds_with_lmf(
+        #         las_dir=LAS_DIR,
+        #         save_dir=RESULTS_DIR,
+        #         apply_dbscan=True,
+        #         eps=1.0,
+        #         min_samples=5,
+        #         window_size=2,
+        #         height_threshold=1
+        #     )
+        # except Exception as e:
+        #     logger.error(f"Error during LMF processing: {e}", exc_info=True)
 
-        # --- Step 6: Match Detected Trees with Ground Truth ---
-        try:
-            logger.info("Loading ground truth data...")
-            ground_truth_data = gpd.read_file(FIELD_SURVEY_PATH)
+        # # --- Step 6: Match Detected Trees with Ground Truth ---
+        # try:
+        #     logger.info("Loading ground truth data...")
+        #     ground_truth_data = gpd.read_file(FIELD_SURVEY_PATH)
 
-            logger.info("Processing LAS files with ground truth matching and calculating metrics...")
-            metrics_summary = process_all_las_files_with_ground_truth(
-                las_dir=LAS_DIR,
-                ground_truth_data=ground_truth_data,
-                save_dir=RESULTS_DIR,
-                max_distance=5.0,
-                max_height_difference=3.0,
-                window_size=2.0,
-                height_threshold=3.0
-            )
+        #     logger.info("Processing LAS files with ground truth matching and calculating metrics...")
+        #     metrics_summary = process_all_las_files_with_ground_truth(
+        #         las_dir=LAS_DIR,
+        #         ground_truth_data=ground_truth_data,
+        #         save_dir=RESULTS_DIR,
+        #         max_distance=5.0,
+        #         max_height_difference=3.0,
+        #         window_size=2.0,
+        #         height_threshold=3.0
+        #     )
 
-            if not metrics_summary.empty:
-                metrics_summary_path = os.path.join(RESULTS_DIR, "detection_metrics_summary.csv")
-                metrics_summary.to_csv(metrics_summary_path, index=False)
-                logger.info(f"Metrics summary saved to {metrics_summary_path}.")
-            else:
-                logger.warning("No metrics were calculated.")
-        except Exception as e:
-            logger.error(f"Error during ground truth matching: {e}", exc_info=True)
+        #     if not metrics_summary.empty:
+        #         metrics_summary_path = os.path.join(RESULTS_DIR, "detection_metrics_summary.csv")
+        #         metrics_summary.to_csv(metrics_summary_path, index=False)
+        #         logger.info(f"Metrics summary saved to {metrics_summary_path}.")
+        #     else:
+        #         logger.warning("No metrics were calculated.")
+        # except Exception as e:
+        #     logger.error(f"Error during ground truth matching: {e}", exc_info=True)
+
 
 
 

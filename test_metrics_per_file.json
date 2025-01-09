@@ -1,0 +1,14 @@
+{
+    "File 1": {
+        "Accuracy": 0.8261629600854618,
+        "Precision": 0.0,
+        "Recall": 0.0,
+        "F1-Score": 0.0
+    },
+    "File 2": {
+        "Accuracy": 0.796913917744973,
+        "Precision": 0.0,
+        "Recall": 0.0,
+        "F1-Score": 0.0
+    }
+}
