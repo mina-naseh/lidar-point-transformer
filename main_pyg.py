@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 def main(file_limit=None):
     # File paths
-    las_dir = "./data/als_copy/"  # Directory containing LAS files
+    las_dir = "./data/als/"  # Directory containing LAS files
     geojson_path = "./data/field_survey.geojson"  # Path to GeoJSON file
 
     # Step 1: Prepare Data with k-NN Graph Transform

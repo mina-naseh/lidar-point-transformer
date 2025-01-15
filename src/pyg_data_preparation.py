@@ -2,10 +2,9 @@ import os
 import torch
 import numpy as np
 from torch_geometric.data import Data
-from sklearn.neighbors import NearestNeighbors
+from torch_geometric.transforms import KNNGraph
 import logging
 import laspy
-import torch.nn.functional as F
 import geopandas as gpd
 
 # Configure logging
@@ -53,53 +52,9 @@ def match_trees_with_points(points_list, geojson_data, radius=1.0):
         logger.info(f"Matched trees for LAS file {i + 1}/{len(points_list)}.")
     return labels_list
 
-def prepare_data(las_dir, geojson_path, k=16, radius=1.0):
-    """
-    Prepare PyTorch Geometric Data objects for training.
-    """
-
-    points_list = load_las_files(las_dir)
-    geojson_data = load_geojson(geojson_path)
-    labels_list = match_trees_with_points(points_list, geojson_data, radius)
-
-    # Find the maximum number of nodes across all graphs
-    max_nodes = max(len(points) for points in points_list)
-    pyg_data_list = []
-
-    for idx, (points, labels) in enumerate(zip(points_list, labels_list)):
-        coords = torch.tensor(points, dtype=torch.float32)
-        labels = torch.tensor(labels, dtype=torch.float32)
-
-        nbrs = NearestNeighbors(n_neighbors=k).fit(coords)
-        edges = nbrs.kneighbors_graph(coords, mode="connectivity").nonzero()
-        edge_index = torch.tensor(np.array(edges)).T
-
-        # Pad x and y tensors to ensure consistency across graphs
-        pad_size = max_nodes - coords.size(0)
-        if pad_size > 0:
-            coords = F.pad(coords, (0, 0, 0, pad_size))  # Pad along the node dimension
-            labels = F.pad(labels, (0, pad_size))
-
-        # Debug edge index compatibility
-        assert edge_index.max().item() < coords.size(0), f"Edge index out of bounds for Data {idx}"
-
-        # Create a PyG Data object
-        data = Data(x=coords, edge_index=edge_index, y=labels)
-        pyg_data_list.append(data)
-
-    return pyg_data_list
-
-
-import os
-import laspy
-import numpy as np
-import torch
-from torch_geometric.data import Data
-from torch_geometric.transforms import KNNGraph
-
 def prepare_data_with_transform(las_dir, geojson_path, k=16, radius=1.0):
     """
-    Prepares PyG Data objects with k-NN graph transform.
+    Prepares PyG Data objects with k-NN graph transform for Point Transformer.
     
     Parameters:
         las_dir (str): Directory containing LAS files.
@@ -110,29 +65,32 @@ def prepare_data_with_transform(las_dir, geojson_path, k=16, radius=1.0):
     Returns:
         list: List of PyG Data objects.
     """
-    points_list = load_las_files(las_dir)  # Your existing function to load LAS points
-    geojson_data = load_geojson(geojson_path)  # Your function to load GeoJSON data
+    points_list = load_las_files(las_dir)  # Load LAS points
+    geojson_data = load_geojson(geojson_path)  # Load GeoJSON
     labels_list = match_trees_with_points(points_list, geojson_data, radius)
 
-    transform = KNNGraph(k=k)
+    transform = KNNGraph(k=k)  # PyG transform for k-NN graph construction
     pyg_data_list = []
 
     for points, labels in zip(points_list, labels_list):
-        # Extract 3D coordinates
-        coords = torch.tensor(points, dtype=torch.float32)  # Shape: [N, 3]
-        labels = torch.tensor(labels, dtype=torch.float32)  # Shape: [N]
+        coords = torch.tensor(points, dtype=torch.float32)  # 3D coordinates
+        labels = torch.tensor(labels, dtype=torch.float32)  # Binary labels
 
-        # Optional: Extract features (e.g., intensity) if available
-        # Assuming `points` already includes features as additional columns
-        features = coords.clone()  # Replace with actual features if available
+        # Normalize coordinates for better training stability
+        coords = (coords - coords.mean(dim=0)) / coords.std(dim=0)
 
-        # Create Data object
+        # Optional: Extract additional features if available
+        features = coords.clone()  # Replace with actual features if present
+
+        # Create PyG Data object
         data = Data(x=features, pos=coords, y=labels)
 
-        # Apply k-NN transform
+        # Apply k-NN graph construction
         data = transform(data)
 
         # Append to the list
         pyg_data_list.append(data)
+        logger.info(f"Prepared PyG Data object for one LAS file with {data.num_nodes} nodes.")
 
+    logger.info(f"Prepared {len(pyg_data_list)} PyG Data objects.")
     return pyg_data_list

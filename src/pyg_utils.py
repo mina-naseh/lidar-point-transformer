@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+
 
 def filter_points_by_label(points, labels, target_label):
     """
@@ -17,6 +17,7 @@ def filter_points_by_label(points, labels, target_label):
     mask = labels == target_label
     return points[mask]
 
+
 def normalize_coordinates(points):
     """
     Normalizes point cloud coordinates to zero mean and unit variance.
@@ -30,6 +31,7 @@ def normalize_coordinates(points):
     mean = np.mean(points, axis=0)
     std = np.std(points, axis=0)
     return (points - mean) / std
+
 
 def visualize_point_cloud(points, labels=None, title="Point Cloud"):
     """

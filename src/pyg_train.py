@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def train_model(train_data, test_data, in_channels, out_channels, epochs, batch_size, lr):
     """
-    Trains the Point Transformer model.
+    Trains the Point Transformer model with weighted loss.
 
     Args:
         train_data (list): List of PyG Data objects for training.
@@ -35,7 +35,15 @@ def train_model(train_data, test_data, in_channels, out_channels, epochs, batch_
     # Initialize model
     model = PointTransformerNet(in_channels, out_channels, hidden_channels=64).to(device)
     optimizer = Adam(model.parameters(), lr=lr)
-    criterion = torch.nn.BCEWithLogitsLoss()
+
+    # Compute class imbalance ratio
+    num_tree_points = sum(data.y.sum().item() for data in train_data)
+    num_non_tree_points = sum((data.y == 0).sum().item() for data in train_data)
+    pos_weight = num_non_tree_points / num_tree_points
+    logger.info(f"Class Imbalance: Non-Tree Points / Tree Points = {pos_weight:.2f}")
+
+    # Weighted loss function
+    criterion = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight], dtype=torch.float32, device=device))
 
     # Create DataLoaders
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
@@ -52,17 +60,18 @@ def train_model(train_data, test_data, in_channels, out_channels, epochs, batch_
 
             # Forward pass
             output = model(data).squeeze(-1)  # Output shape: [N]
-            loss = criterion(output, data.y.float())  # Binary classification loss
+            loss = criterion(output, data.y.float())  # Weighted binary classification loss
             loss.backward()
             optimizer.step()
 
             total_loss += loss.item()
 
         avg_loss = total_loss / len(train_loader)
-        print(f"Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f}")
+        logger.info(f"Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f}")
 
-    print("Training complete.")
+    logger.info("Training complete.")
     return model, test_loader, device
+
 
 
 
