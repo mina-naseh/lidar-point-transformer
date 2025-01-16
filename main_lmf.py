@@ -8,15 +8,13 @@ from src.field_survey_visualization import (
     plot_geojson_species_map,
     plot_field_survey_subplots,
     plot_species_bar_chart,
-    plot_field_density
+    plot_field_density,
+    visualize_raster_images
 )
 from src.point_cloud_utils import (
     process_and_visualize_multiple_point_clouds,
     process_and_visualize_multiple_point_clouds_with_lmf,
     process_all_las_files_with_ground_truth
-)
-from src.orthophotos_utils import (
-    visualize_raster_images
 )
 
 # --- Configure Logging ---
