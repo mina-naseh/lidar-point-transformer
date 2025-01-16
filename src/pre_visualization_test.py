@@ -42,7 +42,6 @@ def inspect_geojson_data(gdf, save_path):
     # Create output directory if not exists
     os.makedirs(save_path, exist_ok=True)
 
-    # Label distribution
     species_counts = gdf["species"].value_counts().reset_index()
     species_counts.columns = ["species", "count"]
     species_counts["Type"] = species_counts["species"].apply(
@@ -51,7 +50,6 @@ def inspect_geojson_data(gdf, save_path):
     species_counts.to_csv(os.path.join(save_path, "species_distribution.csv"), index=False)
     logger.info("Species distribution saved as species_distribution.csv")
 
-    # Visualize species distribution
     plt.figure(figsize=(10, 6))
     ax = sns.barplot(
         data=species_counts,
@@ -68,7 +66,6 @@ def inspect_geojson_data(gdf, save_path):
     ax.set_ylabel("Species", fontsize=12)
     ax.grid(axis="x", color="black", alpha=0.1)
 
-    # Save the plot
     plot_path = os.path.join(save_path, "species_distribution.png")
     save_plot(plot_path)
 
@@ -108,20 +105,44 @@ def plot_geojson_species_map(gdf, save_path):
 
 def visualize_raster_images(tif_dir, save_path):
     """
-    Visualizes raster images and saves the plot.
+    Visualizes raster images in a 5x2 layout and saves the plot.
+
+    Parameters:
+    - tif_dir (str): Path to the directory containing raster files (.tif).
+    - save_path (str): Path to save the combined plot.
     """
     logger.info(f"Visualizing raster images in {tif_dir}...")
-    tiff_files = [os.path.join(tif_dir, f) for f in os.listdir(tif_dir) if f.endswith(".tif")]
-    fig, axes = plt.subplots(len(tiff_files), 1, figsize=(10, len(tiff_files) * 4))
 
-    for ax, tif_file in zip(axes, tiff_files):
+    tiff_files = [os.path.join(tif_dir, f) for f in os.listdir(tif_dir) if f.endswith(".tif")]
+    if not tiff_files:
+        logger.warning(f"No raster files found in {tif_dir}.")
+        return
+    
+    num_files = len(tiff_files)
+    assert num_files <= 10, "The directory contains more than 10 raster files."
+
+    num_cols = 5
+    num_rows = 2
+
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(num_cols * 5, num_rows * 5))
+
+    axes = axes.flatten()
+
+    for i, (tif_file, ax) in enumerate(zip(tiff_files, axes)):
         with rasterio.open(tif_file) as src:
-            img = src.read(1)
-            ax.imshow(img, cmap="gist_earth")
-            ax.set_title(os.path.basename(tif_file), fontsize=12)
+            img = src.read()
+            ax.imshow(np.rollaxis(img, 0, 3) / 255.0)
+            ax.set_title(f"Raster: {os.path.basename(tif_file)}", fontsize=12)
             ax.axis("off")
 
-    save_plot(save_path)
+    for ax in axes[len(tiff_files):]:
+        ax.set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches="tight")
+    logger.info(f"Raster images saved in 5x2 layout as {save_path}")
+    plt.close()
+
 
 # --- Normalization and Filtering ---
 def normalize_geojson_heights(gdf):
@@ -186,13 +207,9 @@ def plot_tree_type_distribution_by_plot(gdf, save_path):
     """
     logger.info("Visualizing tree type distribution by plot...")
 
-    # Define coniferous species
-    conifers = ["Fir", "Pine", "Spruce"]  # Adjust this list as needed
-
-    # Add 'Type' column
+    conifers = ["Fir", "Pine", "Spruce"] 
     gdf["Type"] = gdf["species"].map(lambda x: "Coniferous" if x in conifers else "Deciduous")
 
-    # Create the plot
     plt.figure(figsize=(10, 6))
     ax = sns.histplot(
         data=gdf,
@@ -207,7 +224,6 @@ def plot_tree_type_distribution_by_plot(gdf, save_path):
         lw=0,
     )
 
-    # Customize the plot
     ax.set_ylim(gdf["plot"].max() + 0.5, gdf["plot"].min() - 0.5)
     ax.set_ylabel("Plot", fontsize=12)
     ax.set_xlabel("Tree Count", fontsize=12)
@@ -217,7 +233,6 @@ def plot_tree_type_distribution_by_plot(gdf, save_path):
     ax.grid(axis="x", color="black", alpha=0.1)
     ax.grid(axis="x", which="minor", color="black", alpha=0.1)
 
-    # Save the plot
     save_plot(save_path)
 
 
@@ -231,22 +246,18 @@ def plot_species_distribution_for_all_plots(gdf, output_dir):
     """
     logger.info("Visualizing species distribution for all plots...")
 
-    # Create the output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
-    # Iterate over unique plot numbers
     unique_plots = gdf["plot"].unique()
     for plot_number in unique_plots:
         logger.info(f"Processing plot {plot_number}...")
 
-        # Filter data for the current plot
         plot_data = gdf.query("plot == @plot_number")
 
         if plot_data.empty:
             logger.warning(f"No data available for plot {plot_number}. Skipping.")
             continue
 
-        # Create the plot
         ax = plot_data.plot(
             column="species",
             legend=True,
@@ -257,7 +268,6 @@ def plot_species_distribution_for_all_plots(gdf, output_dir):
         )
         ax.set_title(f"Species Distribution in Plot {int(plot_number)}", fontsize=16)
 
-        # Save the plot
         save_path = os.path.join(output_dir, f"species_distribution_plot_{int(plot_number)}.png")
         save_plot(save_path)
 
@@ -291,10 +301,8 @@ def process_data(data_dir, output_dir):
         output_dir=os.path.join(output_dir, "species_distribution_plots"),
     )
 
-    # Visualize raster images
     visualize_raster_images(os.path.join(data_dir, "ortho"), save_path=os.path.join(output_dir, "raster_images.png"))
 
-    # Normalize GeoJSON and save
     normalized_survey = normalize_geojson_heights(field_survey)
     normalized_survey.to_file(os.path.join(output_dir, "normalized_field_survey.geojson"), driver="GeoJSON")
 
