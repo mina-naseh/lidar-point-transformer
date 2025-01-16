@@ -174,6 +174,53 @@ def save_filtered_las(points, save_path):
     las.write(save_path)
     logger.info(f"Filtered LAS file saved to {save_path}")
 
+
+
+def plot_tree_type_distribution_by_plot(gdf, save_path):
+    """
+    Plots the distribution of coniferous and deciduous trees across plots and saves the plot.
+
+    Parameters:
+    - gdf (GeoDataFrame): The GeoDataFrame containing tree data.
+    - save_path (str): Path to save the plot image.
+    """
+    logger.info("Visualizing tree type distribution by plot...")
+
+    # Define coniferous species
+    conifers = ["Fir", "Pine", "Spruce"]  # Adjust this list as needed
+
+    # Add 'Type' column
+    gdf["Type"] = gdf["species"].map(lambda x: "Coniferous" if x in conifers else "Deciduous")
+
+    # Create the plot
+    plt.figure(figsize=(10, 6))
+    ax = sns.histplot(
+        data=gdf,
+        y="plot",
+        discrete=True,
+        hue="Type",
+        hue_order=["Coniferous", "Deciduous"],
+        palette=["#2A5C03", "#DAA520"],
+        multiple="stack",
+        shrink=0.75,
+        alpha=1,
+        lw=0,
+    )
+
+    # Customize the plot
+    ax.set_ylim(gdf["plot"].max() + 0.5, gdf["plot"].min() - 0.5)
+    ax.set_ylabel("Plot", fontsize=12)
+    ax.set_xlabel("Tree Count", fontsize=12)
+    ax.set_title("Tree Type Distribution by Plot", fontsize=16)
+    ax.yaxis.set_major_locator(plt.MultipleLocator(1))
+    ax.xaxis.set_minor_locator(plt.MultipleLocator(50))
+    ax.grid(axis="x", color="black", alpha=0.1)
+    ax.grid(axis="x", which="minor", color="black", alpha=0.1)
+
+    # Save the plot
+    save_plot(save_path)
+
+
 # --- Main Workflow ---
 def process_data(data_dir, output_dir):
     """
@@ -193,6 +240,10 @@ def process_data(data_dir, output_dir):
 
     # Inspect LAS files
     inspect_las_data(os.path.join(data_dir, "als"), output_dir)
+    plot_tree_type_distribution_by_plot(
+        gdf=field_survey,
+        save_path=os.path.join(output_dir, "tree_type_distribution_by_plot.png"),
+    )
 
     # Visualize raster images
     visualize_raster_images(os.path.join(data_dir, "ortho"), save_path=os.path.join(output_dir, "raster_images.png"))
