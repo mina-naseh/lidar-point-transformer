@@ -4,13 +4,6 @@ import geopandas as gpd
 from src.field_survey_geojson_utils import (
     process_field_survey_geojson,
 )
-from src.field_survey_visualization import (
-    plot_geojson_species_map,
-    plot_field_survey_subplots,
-    plot_species_bar_chart,
-    plot_field_density,
-    visualize_raster_images
-)
 from src.point_cloud_utils import (
     process_and_visualize_multiple_point_clouds,
     process_and_visualize_multiple_point_clouds_with_lmf,
@@ -35,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # --- Constants ---
 DATA_DIR = "./data"
-PLOTS_DIR = "./visualizations"
+
 RESULTS_DIR = "./results"
 FIELD_SURVEY_PATH = os.path.join(DATA_DIR, "field_survey.geojson")
 TIF_DIR = os.path.join(DATA_DIR, "ortho")
@@ -43,7 +36,7 @@ LAS_DIR = os.path.join(DATA_DIR, "als")
 DROP_COLUMNS = ["tree_no"]
 
 # Ensure Output Directories Exist
-os.makedirs(PLOTS_DIR, exist_ok=True)
+
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
@@ -81,73 +74,6 @@ def main():
             logger.error("One or more required paths are missing. Exiting workflow.")
             return
 
-        # # --- Step 1: Load and Preprocess Field Survey Data ---
-        # logger.info("Loading field survey data...")
-        # field_survey = process_field_survey_geojson(
-        #     path=FIELD_SURVEY_PATH,
-        #     drop_columns=DROP_COLUMNS,
-        #     missing_values_report_path=os.path.join(LOGS_DIR, "missing_values.csv"),
-        # )
-
-        # if field_survey.empty:
-        #     logger.error("Field survey data is empty. Exiting workflow.")
-        #     return
-
-        # # --- Step 2: Visualize Field Survey ---
-        # try:
-        #     logger.info("Plotting species count...")
-        #     plot_species_bar_chart(
-        #         field_survey,
-        #         species_col="species",
-        #         save_path=os.path.join(PLOTS_DIR, "species_counts.png")
-        #     )
-
-        #     logger.info("Plotting density plots...")
-        #     plot_field_density(
-        #         field_survey,
-        #         columns=["d1", "d2", "dbh"],
-        #         save_path=os.path.join(PLOTS_DIR, "density_plots.png")
-        #     )
-
-        #     logger.info("Plotting geographic map of species...")
-        #     plot_geojson_species_map(
-        #         field_survey,
-        #         species_col="species",
-        #         save_path=os.path.join(PLOTS_DIR, "field_survey_map.png")
-        #     )
-
-        #     logger.info("Plotting individual rectangles for plots...")
-        #     plot_field_survey_subplots(
-        #         field_survey,
-        #         plot_col="plot",
-        #         save_path=os.path.join(PLOTS_DIR, "individual_rectangles.png")
-        #     )
-        # except Exception as e:
-        #     logger.error(f"Error during field survey visualization: {e}", exc_info=True)
-
-        # # --- Step 3: Visualize Raster Images ---
-        # try:
-        #     logger.info("Visualizing raster images...")
-        #     visualize_raster_images(
-        #         TIF_DIR,
-        #         save_path=os.path.join(PLOTS_DIR, "raster_images.png")
-        #     )
-        # except Exception as e:
-        #     logger.error(f"Error during raster visualization: {e}", exc_info=True)
-
-        # # --- Step 4: Process and Visualize Point Cloud Data ---
-        # try:
-        #     logger.info("Processing and visualizing point cloud data...")
-        #     process_and_visualize_multiple_point_clouds(
-        #         las_dir=LAS_DIR,
-        #         save_dir=PLOTS_DIR,
-        #         apply_dbscan=True,
-        #         eps=1.0,
-        #         min_samples=5,
-        #         percentile=5
-        #     )
-        # except Exception as e:
-        #     logger.error(f"Error during point cloud processing: {e}", exc_info=True)
 
         # # --- Step 5: Process Point Cloud Data with LMF ---
         # try:
@@ -188,7 +114,6 @@ def main():
         #         logger.warning("No metrics were calculated.")
         # except Exception as e:
         #     logger.error(f"Error during ground truth matching: {e}", exc_info=True)
-
 
 
 
