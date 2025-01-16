@@ -221,6 +221,47 @@ def plot_tree_type_distribution_by_plot(gdf, save_path):
     save_plot(save_path)
 
 
+def plot_species_distribution_for_all_plots(gdf, output_dir):
+    """
+    Plots the spatial distribution of species for all plots and saves each plot with a corresponding name.
+
+    Parameters:
+    - gdf (GeoDataFrame): The GeoDataFrame containing tree data.
+    - output_dir (str): Directory to save the plot images.
+    """
+    logger.info("Visualizing species distribution for all plots...")
+
+    # Create the output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Iterate over unique plot numbers
+    unique_plots = gdf["plot"].unique()
+    for plot_number in unique_plots:
+        logger.info(f"Processing plot {plot_number}...")
+
+        # Filter data for the current plot
+        plot_data = gdf.query("plot == @plot_number")
+
+        if plot_data.empty:
+            logger.warning(f"No data available for plot {plot_number}. Skipping.")
+            continue
+
+        # Create the plot
+        ax = plot_data.plot(
+            column="species",
+            legend=True,
+            s=5,
+            aspect="equal",
+            figsize=(8, 8),
+            cmap="viridis",
+        )
+        ax.set_title(f"Species Distribution in Plot {int(plot_number)}", fontsize=16)
+
+        # Save the plot
+        save_path = os.path.join(output_dir, f"species_distribution_plot_{int(plot_number)}.png")
+        save_plot(save_path)
+
+
 # --- Main Workflow ---
 def process_data(data_dir, output_dir):
     """
@@ -243,6 +284,11 @@ def process_data(data_dir, output_dir):
     plot_tree_type_distribution_by_plot(
         gdf=field_survey,
         save_path=os.path.join(output_dir, "tree_type_distribution_by_plot.png"),
+    )
+
+    plot_species_distribution_for_all_plots(
+        gdf=field_survey,
+        output_dir=os.path.join(output_dir, "species_distribution_plots"),
     )
 
     # Visualize raster images
