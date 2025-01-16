@@ -1,17 +1,27 @@
 import matplotlib.pyplot as plt
 import logging
 import seaborn as sns
-import math
 import os
+import numpy as np
+import pandas as pd
+import geopandas as gpd
+import laspy
 import rasterio
+import json
+import scipy.interpolate
+import csv
+
+LAS_GROUND_CLASS = 2
 
 # Configure logging
 logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
+
+# --- Utility Functions ---
 def save_plot(save_path):
     """
     Saves the current plot to a file.
@@ -19,633 +29,464 @@ def save_plot(save_path):
     Parameters:
     - save_path (str): Path to save the plot.
     """
-    try:
-        plt.savefig(save_path, bbox_inches='tight')
-        logger.info(f"Plot saved to {save_path}")
-    except Exception as e:
-        logger.error(f"Failed to save plot to {save_path}: {e}")
-    finally:
-        plt.close()
+    plt.savefig(save_path, bbox_inches="tight")
+    logger.info(f"Plot saved to {save_path}")
+    plt.close()
 
-def plot_geojson_species_map(gdf, species_col='species', save_path=None):
+def inspect_geojson_data(gdf, save_path):
+    """
+    Inspects GeoJSON data for label distributions and missing values,
+    saves the report, and visualizes species distribution.
+
+    Parameters:
+    - gdf (GeoDataFrame): The GeoDataFrame to inspect.
+    - save_path (str): Path to save the summary reports and visualizations.
+    """
+    logger.info("Inspecting GeoJSON data...")
+
+    # Create output directory if not exists
+    os.makedirs(save_path, exist_ok=True)
+
+    species_counts = gdf["species"].value_counts().reset_index()
+    species_counts.columns = ["species", "count"]
+    species_counts["Type"] = species_counts["species"].apply(
+        lambda x: "Coniferous" if x in ["Fir", "Pine", "Spruce"] else "Deciduous"
+    )
+    species_counts.to_csv(os.path.join(save_path, "species_distribution.csv"), index=False)
+    logger.info("Species distribution saved as species_distribution.csv")
+
+    plt.figure(figsize=(10, 6))
+    ax = sns.barplot(
+        data=species_counts,
+        x="count",
+        y="species",
+        hue="Type",
+        dodge=False,
+        hue_order=["Coniferous", "Deciduous"],
+        palette=["#2A5C03", "#DAA520"],
+        saturation=1,
+    )
+    ax.set_title("Species Distribution in the Dataset", fontsize=16)
+    ax.set_xlabel("Count", fontsize=12)
+    ax.set_ylabel("Species", fontsize=12)
+    ax.grid(axis="x", color="black", alpha=0.1)
+
+    plot_path = os.path.join(save_path, "species_distribution.png")
+    save_plot(plot_path)
+
+
+# --- LAS Functions ---
+def inspect_las_file(las_file, output_dir):
+    """
+    Inspects a LAS file, including header and point attributes, and saves the output.
+
+    Parameters:
+    - las_file (str): Path to the LAS file.
+    - output_dir (str): Directory to save detailed inspection outputs.
+    """
+    las = laspy.read(las_file)
+    header_info = {
+        "version": las.header.version,
+        "system_identifier": las.header.system_identifier,
+        "generating_software": las.header.generating_software,
+        "point_count": int(las.header.point_count),
+        "bounds": {
+            "x": [float(las.x.min()), float(las.x.max())],
+            "y": [float(las.y.min()), float(las.y.max())],
+            "z": [float(las.z.min()), float(las.z.max())],
+        },
+        "point_format": int(las.header.point_format.id),
+        "scales": [float(scale) for scale in las.header.scales],
+        "offsets": [float(offset) for offset in las.header.offsets],
+    }
+
+    point_attributes = {
+        dim: list(map(float, getattr(las, dim)[:10])) for dim in las.point_format.dimension_names
+    }
+
+    output = {
+        "header": header_info,
+        "point_attributes": point_attributes,
+    }
+
+    output_file = os.path.join(output_dir, f"{os.path.basename(las_file)}_details.json")
+    with open(output_file, "w") as f:
+        json.dump(output, f, indent=4)
+
+    logger.info(f"Saved detailed inspection for {os.path.basename(las_file)} to {output_file}")
+
+
+def inspect_all_las_files(las_dir, output_dir):
+    """
+    Inspects all LAS files in a directory and saves detailed outputs.
+
+    Parameters:
+    - las_dir (str): Directory containing LAS files.
+    - output_dir (str): Directory to save detailed inspection outputs.
+    """
+    logger.info("Inspecting all LAS files...")
+    os.makedirs(output_dir, exist_ok=True)
+
+    las_files = [os.path.join(las_dir, f) for f in os.listdir(las_dir) if f.endswith(".las")]
+    for las_file in las_files:
+        inspect_las_file(las_file, output_dir)
+
+
+
+def inspect_las_data(las_dir, save_path):
+    """
+    Aggregates summary statistics for all LAS files and saves them to a CSV.
+
+    Parameters:
+    - las_dir (str): Directory containing LAS files.
+    - save_path (str): Path to save the summary report.
+    """
+    logger.info("Aggregating LAS file statistics...")
+    os.makedirs(save_path, exist_ok=True)
+
+    las_files = [os.path.join(las_dir, f) for f in os.listdir(las_dir) if f.endswith(".las")]
+    stats = []
+
+    for file in las_files:
+        las = laspy.read(file)
+        points = np.vstack((las.x, las.y, las.z)).T
+        stats.append({
+            "file": os.path.basename(file),
+            "num_points": len(points),
+            "min_x": points[:, 0].min(),
+            "max_x": points[:, 0].max(),
+            "min_y": points[:, 1].min(),
+            "max_y": points[:, 1].max(),
+            "min_z": points[:, 2].min(),
+            "max_z": points[:, 2].max(),
+            "unique_classes": len(np.unique(getattr(las, "classification", []))),
+        })
+
+    stats_df = pd.DataFrame(stats)
+    stats_file = os.path.join(save_path, "las_stats.csv")
+    stats_df.to_csv(stats_file, index=False)
+    logger.info(f"Saved LAS file statistics to {stats_file}")
+
+
+# --- Visualization Functions ---
+def plot_geojson_species_map(gdf, save_path):
     """
     Plots a geographic map of trees colored by species and saves the plot.
     """
-    if gdf.empty:
-        logger.warning("GeoDataFrame is empty. Skipping geographic map plotting.")
+    gdf = gdf.to_crs(epsg=4326)
+    ax = gdf.plot(column="species", cmap="viridis", legend=True, figsize=(15, 15), markersize=1)
+    plt.title("Tree Locations Colored by Species", fontsize=18)
+    save_plot(save_path)
+
+def visualize_raster_images(tif_dir, save_path):
+    """
+    Visualizes raster images in a 5x2 layout and saves the plot.
+
+    Parameters:
+    - tif_dir (str): Path to the directory containing raster files (.tif).
+    - save_path (str): Path to save the combined plot.
+    """
+    logger.info(f"Visualizing raster images in {tif_dir}...")
+
+    tiff_files = [os.path.join(tif_dir, f) for f in os.listdir(tif_dir) if f.endswith(".tif")]
+    if not tiff_files:
+        logger.warning(f"No raster files found in {tif_dir}.")
         return
+    
+    num_files = len(tiff_files)
+    assert num_files <= 10, "The directory contains more than 10 raster files."
 
-    try:
-        gdf = gdf.to_crs(epsg=4326)  # Convert to WGS84
-        ax = gdf.plot(column=species_col, cmap='viridis', legend=True, figsize=(15, 15), markersize=1)
-        plt.title('Geographic Plot of Trees Colored by Species', fontsize=21)
+    num_cols = 5
+    num_rows = 2
 
-        legend = ax.get_legend()
-        if legend:
-            for label in legend.get_texts():
-                label.set_fontsize(16)
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(num_cols * 5, num_rows * 5))
 
-        plt.tick_params(axis='both', which='major', labelsize=14)
-        plt.tight_layout()
-        save_plot(save_path)
-    except Exception as e:
-        logger.error(f"Error during species map plotting: {e}")
+    axes = axes.flatten()
 
-def plot_field_survey_subplots(gdf, plot_col='plot', save_path=None):
+    for i, (tif_file, ax) in enumerate(zip(tiff_files, axes)):
+        with rasterio.open(tif_file) as src:
+            img = src.read()
+            ax.imshow(np.rollaxis(img, 0, 3) / 255.0)
+            ax.set_title(f"Raster: {os.path.basename(tif_file)}", fontsize=12)
+            ax.axis("off")
+
+    for ax in axes[len(tiff_files):]:
+        ax.set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches="tight")
+    logger.info(f"Raster images saved in 5x2 layout as {save_path}")
+    plt.close()
+
+def plot_tree_type_distribution_by_plot(gdf, save_path):
     """
-    Creates a subplot for each unique plot ID, showing geographic tree distribution, and saves the plot.
+    Plots the distribution of coniferous and deciduous trees across plots and saves the plot.
+
+    Parameters:
+    - gdf (GeoDataFrame): The GeoDataFrame containing tree data.
+    - save_path (str): Path to save the plot image.
     """
-    if gdf.empty:
-        logger.warning("GeoDataFrame is empty. Skipping subplot creation.")
-        return
+    logger.info("Visualizing tree type distribution by plot...")
 
-    try:
-        unique_plots = sorted(gdf[plot_col].unique())
-        logger.info(f"Creating subplots for {len(unique_plots)} unique plots.")
+    conifers = ["Fir", "Pine", "Spruce"] 
+    gdf["Type"] = gdf["species"].map(lambda x: "Coniferous" if x in conifers else "Deciduous")
 
-        num_cols = min(5, len(unique_plots))
-        num_rows = math.ceil(len(unique_plots) / num_cols)
-        fig, axes = plt.subplots(num_rows, num_cols, figsize=(20, num_rows * 5), squeeze=False)
+    plt.figure(figsize=(10, 6))
+    ax = sns.histplot(
+        data=gdf,
+        y="plot",
+        discrete=True,
+        hue="Type",
+        hue_order=["Coniferous", "Deciduous"],
+        palette=["#2A5C03", "#DAA520"],
+        multiple="stack",
+        shrink=0.75,
+        alpha=1,
+        lw=0,
+    )
 
-        for i, plot_id in enumerate(unique_plots):
-            ax = axes[i // num_cols, i % num_cols]
-            subset = gdf[gdf[plot_col] == plot_id]
-            subset.plot(column='species', cmap='viridis', legend=False, ax=ax, markersize=9)
-            ax.set_title(f"Plot {plot_id}", fontsize=14)
-            ax.set_xlim(subset.total_bounds[[0, 2]])
-            ax.set_ylim(subset.total_bounds[[1, 3]])
-            ax.axis('off')
+    ax.set_ylim(gdf["plot"].max() + 0.5, gdf["plot"].min() - 0.5)
+    ax.set_ylabel("Plot", fontsize=12)
+    ax.set_xlabel("Tree Count", fontsize=12)
+    ax.set_title("Tree Type Distribution by Plot", fontsize=16)
+    ax.yaxis.set_major_locator(plt.MultipleLocator(1))
+    ax.xaxis.set_minor_locator(plt.MultipleLocator(50))
+    ax.grid(axis="x", color="black", alpha=0.1)
+    ax.grid(axis="x", which="minor", color="black", alpha=0.1)
 
-        for ax in axes.flatten()[len(unique_plots):]:
-            ax.set_visible(False)
+    save_plot(save_path)
 
-        plt.tight_layout()
-        save_plot(save_path)
-    except Exception as e:
-        logger.error(f"Error during subplot plotting: {e}")
-
-def plot_species_bar_chart(df, species_col='species', save_path=None):
+def plot_species_distribution_for_all_plots(gdf, output_dir):
     """
-    Creates a bar plot for species counts and saves the plot.
+    Plots the spatial distribution of species for all plots and saves each plot with a corresponding name.
+
+    Parameters:
+    - gdf (GeoDataFrame): The GeoDataFrame containing tree data.
+    - output_dir (str): Directory to save the plot images.
     """
-    if df.empty:
-        logger.warning("The DataFrame is empty. Skipping species count plot.")
-        return
+    logger.info("Visualizing species distribution for all plots...")
 
-    try:
-        species_counts = df[species_col].value_counts().reset_index()
-        species_counts.columns = [species_col, 'Count']
-        logger.info(f"Plotting bar chart for {len(species_counts)} species.")
+    os.makedirs(output_dir, exist_ok=True)
 
-        plt.figure(figsize=(15, 6))
-        sns.barplot(
-            x='Count',
-            y=species_col,
-            data=species_counts,
-            palette="viridis"
+    unique_plots = gdf["plot"].unique()
+    for plot_number in unique_plots:
+        logger.info(f"Processing plot {plot_number}...")
+
+        plot_data = gdf.query("plot == @plot_number")
+
+        if plot_data.empty:
+            logger.warning(f"No data available for plot {plot_number}. Skipping.")
+            continue
+
+        ax = plot_data.plot(
+            column="species",
+            legend=True,
+            s=5,
+            aspect="equal",
+            figsize=(8, 8),
+            cmap="viridis",
         )
-        plt.title("Species Count", fontsize=16)
-        plt.xlabel("Count", fontsize=12)
-        plt.ylabel("Species", fontsize=12)
-        plt.tight_layout()
-        save_plot(save_path)
-    except Exception as e:
-        logger.error(f"Error during species bar chart plotting: {e}")
+        ax.set_title(f"Species Distribution in Plot {int(plot_number)}", fontsize=16)
 
-def plot_field_density(df, columns, save_path=None):
+        save_path = os.path.join(output_dir, f"species_distribution_plot_{int(plot_number)}.png")
+        save_plot(save_path)
+
+def visualize_point_clouds_with_colorbar(las_dir, output_dir):
+    """
+    Generates 3D scatter plots for LAS files with a color bar for height and saves them.
+
+    Parameters:
+    - las_dir (str): Path to the directory containing LAS files.
+    - output_dir (str): Path to save the plots.
+    """
+    logger.info("Visualizing 3D point clouds with height color bar...")
+    os.makedirs(output_dir, exist_ok=True)
+
+    las_files = sorted([os.path.join(las_dir, f) for f in os.listdir(las_dir) if f.endswith(".las")])
+    for las_file in las_files:
+        plot_name = os.path.basename(las_file).split(".")[0]
+        logger.info(f"Processing {plot_name}...")
+
+        cloud = laspy.read(las_file).xyz
+        cloud -= cloud.min(axis=0, keepdims=True)
+
+        fig = plt.figure(figsize=(10, 5))
+        ax = fig.add_subplot(projection="3d")
+        scatter = ax.scatter(*cloud.swapaxes(0, 1), c=cloud[:, 2], cmap="viridis", s=2)
+        ax.view_init(elev=30, azim=0)
+        ax.set_title(f"{plot_name}", y=0.85)
+        ax.set_aspect("auto")
+
+        # Add color bar
+        cbar = fig.colorbar(scatter, ax=ax, shrink=0.6, aspect=10)
+        cbar.set_label("Height (Z-axis)", fontsize=12)
+
+        save_path = os.path.join(output_dir, f"{plot_name}.png")
+        plt.savefig(save_path, bbox_inches="tight")
+        plt.close()
+        logger.info(f"Saved 3D plot for {plot_name} with color bar as {save_path}")
+
+def plot_field_density(df, columns, save_path):
     """
     Creates density plots for specified columns and saves the plot.
+
+    Parameters:
+    - df (DataFrame): The DataFrame containing the columns to plot.
+    - columns (list): List of column names to plot density distributions for.
+    - save_path (str): Path to save the combined plot.
     """
     if df.empty:
         logger.warning("The DataFrame is empty. Skipping density plot.")
         return
 
-    try:
-        logger.info(f"Creating density plots for columns: {columns}")
-        num_cols = len(columns)
-        plt.figure(figsize=(num_cols * 6, 5))
-        for i, col in enumerate(columns, 1):
-            plt.subplot(1, num_cols, i)
-            sns.kdeplot(df[col], fill=True)
-            plt.title(f"Density Plot for {col}", fontsize=14)
-            plt.xlabel(col, fontsize=12)
-            plt.ylabel("Density", fontsize=12)
-
-        plt.tight_layout()
-        save_plot(save_path)
-    except Exception as e:
-        logger.error(f"Error during density plot creation: {e}")
-
-def visualize_raster_images(tif_dir, num_plots=10, save_path=None):
-    """
-    Visualizes raster images from a specified directory and saves the plot.
-    """
-    if not os.path.exists(tif_dir):
-        logger.error(f"Directory does not exist: {tif_dir}")
-        return
-
-    tiff_files = [os.path.join(tif_dir, f'plot_{i:02d}.tif') for i in range(1, num_plots + 1)]
-    tiff_files = [f for f in tiff_files if os.path.exists(f)]
-
-    if not tiff_files:
-        logger.warning(f"No valid raster files found in directory: {tif_dir}")
-        return
-
-    logger.info(f"Visualizing {len(tiff_files)} raster images.")
-    num_cols = min(5, len(tiff_files))
-    num_rows = math.ceil(len(tiff_files) / num_cols)
-    fig, axes = plt.subplots(num_rows, num_cols, figsize=(20, num_rows * 5), squeeze=False)
-
-    for i, tiff_file in enumerate(tiff_files):
-        ax = axes[i // num_cols, i % num_cols]
-        try:
-            with rasterio.open(tiff_file) as src:
-                img = src.read(1)
-                ax.imshow(img, cmap='gist_earth')
-                ax.set_title(os.path.basename(tiff_file).split('.')[0], fontsize=12)
-                ax.axis('off')
-        except Exception as e:
-            logger.warning(f"Error reading raster file {tiff_file}: {e}")
-            ax.set_visible(False)
-
-    for ax in axes.flatten()[len(tiff_files):]:
-        ax.set_visible(False)
+    logger.info(f"Creating density plots for columns: {columns}")
+    num_cols = len(columns)
+    plt.figure(figsize=(num_cols * 6, 5))
+    for i, col in enumerate(columns, 1):
+        plt.subplot(1, num_cols, i)
+        sns.kdeplot(df[col], fill=True)
+        plt.title(f"Density Plot for {col}", fontsize=14)
+        plt.xlabel(col, fontsize=12)
+        plt.ylabel("Density", fontsize=12)
 
     plt.tight_layout()
     save_plot(save_path)
 
 
-import numpy as np
-import laspy
-import logging
-from sklearn.cluster import DBSCAN
-import matplotlib.pyplot as plt
-import os
-import glob
-
-import scipy.spatial
-import geopandas as gpd
-from scipy.interpolate import griddata
-from scipy.spatial.distance import cdist
-import pandas as pd
-
-
-# Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-
-
-
-def load_las_file(file_path):
+# --- normalizing and filtering Functions ---
+def normalize_cloud_height(las):
     """
-    Loads a LAS file and returns its point cloud data.
+    Normalizes the height of a point cloud using the ground classification.
 
     Parameters:
-    - file_path (str): Path to the LAS file.
+    - las: laspy.LasData object representing the LAS file.
 
     Returns:
-    - numpy.ndarray: Point cloud data (X, Y, Z, classification).
+    - numpy.ndarray: Normalized point cloud with heights relative to the ground.
     """
-    try:
-        las = laspy.read(file_path)
+    out = las.xyz.copy()
+    ground_mask = las.classification == LAS_GROUND_CLASS
 
-        # Extract X, Y, Z, and classification
-        points = np.vstack((las.x, las.y, las.z, las.classification)).T
+    assert np.any(ground_mask), "No ground points found in the LAS file!"
 
-        logger.info(f"Loaded {points.shape[0]} points from {file_path}")
-        return points
-    except Exception as e:
-        logger.error(f"Error loading LAS file {file_path}: {e}")
-        return np.array([])  # Return an empty array if an error occurs
-
-
-
-def filter_points_by_height(points, height_threshold=None, percentile=None):
-    """
-    Filters points based on a height threshold or a percentile of Z-values.
-
-    Parameters:
-    - points (numpy.ndarray): Point cloud data (X, Y, Z, classification).
-    - height_threshold (float, optional): Minimum Z value to retain points.
-    - percentile (float, optional): Percentile of Z-values to compute threshold. If provided, overrides height_threshold.
-
-    Returns:
-    - numpy.ndarray: Filtered point cloud data.
-    """
-    if points.shape[1] < 3:
-        logger.error("Points array does not contain enough columns for filtering.")
-        return points
-
-    if percentile is not None:
-        z_threshold = np.percentile(points[:, 2], percentile)  # Percentile of Z-values
-        logger.info(f"Using percentile-based height threshold: {z_threshold:.2f}")
-    elif height_threshold is not None:
-        z_threshold = height_threshold  # Fixed height threshold
-        logger.info(f"Using fixed height threshold: {z_threshold:.2f}")
-    else:
-        logger.warning("No height threshold or percentile provided. Returning all points.")
-        return points
-
-    # Filter points based on Z (height)
-    filtered_points = points[points[:, 2] >= z_threshold]
-    logger.info(f"Filtered points: {filtered_points.shape[0]} retained out of {points.shape[0]}")
-
-    return filtered_points
-
-
-
-def remove_noise_with_dbscan(points, eps=1.0, min_samples=5):
-    """
-    Removes noise from point clouds using DBSCAN clustering.
-
-    Parameters:
-    - points (numpy.ndarray): Point cloud data (X, Y, Z, classification).
-    - eps (float): The maximum distance between two samples for them to be in the same cluster.
-    - min_samples (int): The minimum number of points required to form a dense region.
-
-    Returns:
-    - numpy.ndarray: Noise-free point cloud data.
-    """
-    if points.size == 0:
-        logger.warning("No points provided for DBSCAN. Returning empty array.")
-        return points
-
-    try:
-        # Apply DBSCAN on spatial coordinates only (X, Y, Z)
-        clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(points[:, :3])
-    except ValueError as e:
-        logger.error(f"DBSCAN clustering failed: {e}")
-        return points
-
-    # Retain only points with valid cluster labels (label >= 0)
-    labels = clustering.labels_
-    filtered_points = points[labels >= 0]
-
-    logger.info(f"DBSCAN retained {filtered_points.shape[0]} points out of {points.shape[0]}")
-    return filtered_points
-
-
-# --- Visualization Functions ---
-
-def visualize_point_cloud(points, title="Point Cloud", color_by="height", save_path=None):
-    """
-    Visualizes a 3D point cloud.
-
-    Parameters:
-    - points (numpy.ndarray): Point cloud data (X, Y, Z, classification).
-    - title (str): Title for the plot. Default is 'Point Cloud'.
-    - color_by (str): Attribute to color the points by. Options: 'height' or 'classification'. Default is 'height'.
-    - save_path (str, optional): Path to save the plot. Default is None.
-
-    Returns:
-    - None: Displays or saves the plot.
-    """
-    if points.size == 0:
-        logger.warning("No points to visualize.")
-        return
-
-    fig = plt.figure(figsize=(10, 8))
-    ax = fig.add_subplot(111, projection="3d")
-
-    # Determine color mapping based on the chosen attribute
-    if color_by == "classification" and points.shape[1] > 3:
-        color_data = points[:, 3]  # Classification
-        cmap = "tab10"  # Discrete colormap for classification
-        logger.info("Coloring points by classification.")
-    else:
-        color_data = points[:, 2]  # Height (Z)
-        cmap = "viridis"  # Continuous colormap for height
-        logger.info("Coloring points by height.")
-
-    # Create 3D scatter plot
-    scatter = ax.scatter(
-        points[:, 0], points[:, 1], points[:, 2],
-        c=color_data, s=1, cmap=cmap
+    ground_level = scipy.interpolate.griddata(
+        points=las.xyz[ground_mask, :2],
+        values=las.xyz[ground_mask, 2],
+        xi=las.xyz[:, :2],
+        method="nearest",
     )
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    plt.title(title)
+    out[:, 2] -= ground_level
+    return out
 
-    # Add colorbar for the scatter plot
-    cbar = plt.colorbar(scatter, ax=ax, shrink=0.5, aspect=10)
-    cbar.set_label(color_by.capitalize())
-
-    if save_path:
-        plt.savefig(save_path, bbox_inches="tight")
-        logger.info(f"{title} plot saved to {save_path}")
-    else:
-        plt.show()
-
-    plt.close()
-
-
-
-def visualize_filtered_point_cloud(file_path, height_threshold=None, apply_dbscan=False, eps=1.0, min_samples=5, color_by="height", save_path=None):
+def preprocess_las_for_models(las_file, base_dir="./data/als_preprocessed", height_threshold=2.0, output_dir="./data/output"):
     """
-    Visualizes a filtered 3D point cloud from a LAS file.
+    Preprocesses a LAS file for LMF and Point Transformer models and logs point statistics.
 
     Parameters:
-    - file_path (str): Path to the LAS file.
-    - height_threshold (float, optional): Minimum height for filtering. Default is None.
-    - apply_dbscan (bool): Whether to apply DBSCAN clustering. Default is False.
-    - eps (float): Maximum distance for DBSCAN clustering. Default is 1.0.
-    - min_samples (int): Minimum samples for DBSCAN clustering. Default is 5.
-    - color_by (str): Attribute to color points by ('height' or 'classification'). Default is 'height'.
-    - save_path (str, optional): Path to save the plot. Default is None.
-
-    Returns:
-    - None: Displays or saves the plot.
+    - las_file (str): Path to the LAS file.
+    - base_dir (str): Base directory to save preprocessed data.
+    - height_threshold (float): Minimum height to include (meters).
+    - output_dir (str): Directory to save the preprocessing report.
     """
-    points = load_las_file(file_path)
-    if points.size == 0:
-        logger.warning("No points to visualize.")
-        return
+    os.makedirs(base_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
-    # Filter points by height threshold
-    if height_threshold is not None:
-        original_count = len(points)
-        points = filter_points_by_height(points, height_threshold)
-        logger.info(f"Applied height threshold {height_threshold}. Retained {len(points)} out of {original_count} points.")
-        if points.size == 0:
-            logger.warning("No points remaining after height filtering.")
-            return
+    # Initialize or append to the report
+    report_file = os.path.join(output_dir, "preprocessing_report.csv")
+    if not os.path.exists(report_file):
+        with open(report_file, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["File", "Vegetation Points Before Threshold", "Vegetation Points After Threshold", "Points Removed"])
 
-    # Apply DBSCAN noise removal
-    if apply_dbscan:
-        original_count = len(points)
-        points = remove_noise_with_dbscan(points, eps, min_samples)
-        logger.info(f"Applied DBSCAN (eps={eps}, min_samples={min_samples}). Retained {len(points)} out of {original_count} points.")
-        if points.size == 0:
-            logger.warning("No points remaining after DBSCAN filtering.")
-            return
+    las = laspy.read(las_file)
 
-    # Visualize the filtered point cloud
-    visualize_point_cloud(
-        points,
-        title=f"Filtered Point Cloud - {os.path.basename(file_path)}",
-        color_by=color_by,
-        save_path=save_path
+    # Normalize height
+    normalized_points = normalize_cloud_height(las)
+
+    # Filter ground and vegetation points
+    ground_mask = las.classification == LAS_GROUND_CLASS
+    ground_points = las.xyz[ground_mask]
+    vegetation_points = normalized_points[~ground_mask]
+
+    # Log point counts
+    total_points_before = len(vegetation_points)
+    vegetation_points = vegetation_points[vegetation_points[:, 2] >= height_threshold]
+    total_points_after = len(vegetation_points)
+    points_removed = total_points_before - total_points_after
+
+    # Save preprocessed outputs
+    las_name = os.path.basename(las_file).replace(".las", "")
+    output_dir = os.path.join(base_dir, las_name)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save normalized vegetation points
+    vegetation_file = os.path.join(output_dir, f"{las_name}_vegetation.npy")
+    np.save(vegetation_file, vegetation_points)
+    logger.info(f"Saved filtered vegetation points (height ≥ {height_threshold}m) to {vegetation_file}")
+
+    # Save ground points for reference
+    ground_file = os.path.join(output_dir, f"{las_name}_ground.npy")
+    np.save(ground_file, ground_points)
+    logger.info(f"Saved ground points to {ground_file}")
+
+    # Append to the report
+    with open(report_file, "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([las_name, total_points_before, total_points_after, points_removed])
+    logger.info(f"Added report entry for {las_name}")
+
+# --- Main Workflow ---
+def process_data(data_dir, output_dir):
+    """
+    Main workflow for processing data.
+
+    Parameters:
+    - data_dir (str): Directory containing input data.
+    - output_dir (str): Directory to save processed data and visualizations.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load and inspect GeoJSON
+    field_survey_path = os.path.join(data_dir, "field_survey.geojson")
+    field_survey = gpd.read_file(field_survey_path)
+    inspect_geojson_data(field_survey, output_dir)
+    plot_geojson_species_map(field_survey, save_path=os.path.join(output_dir, "species_map.png"))
+    
+    # Inspect all LAS files (detailed logs and JSON outputs)
+    las_dir = os.path.join(data_dir, "als")
+    detailed_output_dir = os.path.join(output_dir, "las_details")
+    inspect_all_las_files(las_dir, detailed_output_dir)
+
+    # Aggregate statistics and save as CSV
+    inspect_las_data(las_dir, save_path=output_dir)
+
+    plot_tree_type_distribution_by_plot(
+        gdf=field_survey,
+        save_path=os.path.join(output_dir, "tree_type_distribution_by_plot.png"),
     )
 
+    plot_species_distribution_for_all_plots(
+        gdf=field_survey,
+        output_dir=os.path.join(output_dir, "species_distribution_plots"),
+    )
 
+    plot_field_density(
+        df=field_survey,
+        columns=field_survey.select_dtypes(include=["number"]).columns.tolist(),
+        save_path=os.path.join(output_dir, "field_density_plots.png"),
+    )
 
-def process_and_visualize_multiple_point_clouds(
-    las_dir, save_dir=None, apply_dbscan=False, eps=1.0, min_samples=5, percentile=None, color_by="height"
-):
-    """
-    Processes and visualizes multiple LAS files with optional filtering and DBSCAN.
+    visualize_raster_images(os.path.join(data_dir, "ortho"), save_path=os.path.join(output_dir, "raster_images.png"))
+    visualize_point_clouds_with_colorbar(
+        las_dir=os.path.join(data_dir, "als"),
+        output_dir=os.path.join(output_dir, "point_cloud_plots"),
+    )
 
-    Parameters:
-    - las_dir (str): Directory containing LAS files.
-    - save_dir (str, optional): Directory to save plots.
-    - apply_dbscan (bool): Whether to apply DBSCAN clustering.
-    - eps (float): Maximum distance for DBSCAN clustering.
-    - min_samples (int): Minimum samples for DBSCAN clustering.
-    - percentile (float, optional): Percentile of Z-values to compute threshold.
-    - color_by (str): Attribute to color points by ('height' or 'classification'). Default is 'height'.
-
-    Returns:
-    - None: Displays or saves the plots.
-    """
-
-    # Collect all LAS files from the directory
+    # Preprocess LAS files for LMF and Point Transformer
+    preprocessed_dir = "./data/als_preprocessed"
+    las_dir = os.path.join(data_dir, "als")
     las_files = [os.path.join(las_dir, f) for f in os.listdir(las_dir) if f.endswith(".las")]
-    if not las_files:
-        logger.warning(f"No LAS files found in directory: {las_dir}")
-        return
+    for las_file in las_files:
+        preprocess_las_for_models(las_file, base_dir=preprocessed_dir, height_threshold=2.0, output_dir=output_dir)
 
-    # Process each LAS file
-    for file_path in sorted(las_files):
-        # Extract plot number from the file name (e.g., plot_01 from plot_01.las)
-        try:
-            plot_number = int(os.path.basename(file_path).split("_")[1].split(".")[0])  # Extract '01', '02', etc.
-        except ValueError:
-            logger.error(f"Could not extract plot number from file: {file_path}. Skipping...")
-            continue
-
-        logger.info(f"Processing plot_{plot_number} from file {file_path}...")
-
-        points = load_las_file(file_path)
-        if points.size == 0:
-            logger.warning(f"File {file_path} is empty. Skipping...")
-            continue
-
-        # Apply percentile-based Z-value threshold if specified
-        if percentile is not None:
-            original_count = len(points)
-            z_threshold = np.percentile(points[:, 2], percentile)
-            logger.info(f"Using {percentile}th percentile as Z-value threshold: {z_threshold:.3f}")
-            points = filter_points_by_height(points, z_threshold)
-            logger.info(f"Retained {len(points)} points out of {original_count} after height filtering.")
-            if points.size == 0:
-                logger.warning(f"No points remaining after height filtering for plot_{plot_number}. Skipping...")
-                continue
-
-        # Apply DBSCAN clustering if enabled
-        if apply_dbscan:
-            original_count = len(points)
-            points = remove_noise_with_dbscan(points, eps=eps, min_samples=min_samples)
-            logger.info(f"Retained {len(points)} points out of {original_count} after DBSCAN filtering.")
-            if points.size == 0:
-                logger.warning(f"No points remaining after DBSCAN filtering for plot_{plot_number}. Skipping...")
-                continue
-
-        # Visualize and optionally save the filtered point cloud
-        plot_title = f"Filtered Point Cloud - plot_{plot_number}"
-        save_path = os.path.join(save_dir, f"plot_{plot_number}.png") if save_dir else None
-        visualize_point_cloud(points, title=plot_title, color_by=color_by, save_path=save_path)
-
-
-
-
-# --- LMF Functions ---
-
-def normalize_cloud_height(points, ground_points):
-    """
-    Normalizes the Z-values of the point cloud relative to the ground level.
-
-    Parameters:
-    - points (numpy.ndarray): Full point cloud data (X, Y, Z, classification).
-    - ground_points (numpy.ndarray): Ground points data (X, Y, Z).
-
-    Returns:
-    - numpy.ndarray: Point cloud with normalized heights (X, Y, Z, classification).
-    """
-    if ground_points.size == 0:
-        logger.warning("No ground points provided. Returning original points.")
-        return points
-
-    try:
-        logger.info(f"Normalizing heights using {len(ground_points)} ground points...")
-
-        # Interpolate ground level based on ground points
-        ground_level = griddata(
-            points=ground_points[:, :2],  # Use X, Y of ground points
-            values=ground_points[:, 2],  # Use Z (height) of ground points
-            xi=points[:, :2],            # Interpolate for all points' X, Y
-            method="nearest"
-        )
-
-        # Normalize the Z-values of points
-        normalized_points = points.copy()
-        normalized_points[:, 2] -= ground_level  # Subtract ground level from Z
-
-        logger.info("Height normalization complete.")
-        return normalized_points
-
-    except Exception as e:
-        logger.error(f"Error during height normalization: {e}")
-        return points  # Return original points in case of failure
-
-
-
-import geopandas as gpd
-import logging
-import numpy as np
-
-# Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# Load field survey data
-def load_field_survey_geojson(path):
-    """
-    Loads the field survey data from the specified path.
-
-    Parameters:
-    - path (str): Path to the GeoJSON file.
-
-    Returns:
-    - GeoDataFrame: The loaded field survey data.
-    """
-    try:
-        logger.info(f"Loading field survey data from {path}")
-        field_survey = gpd.read_file(path)
-        logger.info(f"Loaded {len(field_survey)} rows of data.")
-        return field_survey
-    except Exception as e:
-        logger.error(f"Failed to load GeoJSON file: {e}")
-        return gpd.GeoDataFrame()  # Return an empty GeoDataFrame for robustness
-
-
-# Drop unnecessary columns
-def clean_field_survey_geojson(field_survey, drop_columns=None):
-    """
-    Cleans the field survey data by dropping unnecessary columns.
-
-    Parameters:
-    - field_survey (GeoDataFrame): The field survey data.
-    - drop_columns (list, optional): List of column names to drop.
-
-    Returns:
-    - GeoDataFrame: The cleaned data.
-    """
-    if drop_columns:
-        logger.info(f"Dropping columns: {drop_columns}")
-        try:
-            field_survey.drop(columns=drop_columns, inplace=True)
-        except KeyError as e:
-            logger.warning(f"Some columns to drop were not found: {e}")
-    return field_survey
-
-
-# Check and report missing values
-def report_field_survey_geojson_missing_values(df, save_path=None):
-    """
-    Reports missing values in the data and optionally saves the report to a file.
-
-    Parameters:
-    - df (DataFrame): The data to analyze.
-    - save_path (str, optional): Path to save the missing values report as a CSV file. Default is None.
-
-    Returns:
-    - DataFrame: Summary of missing values.
-    """
-    logger.info("Checking for missing values.")
-    missing_values_table = df.isnull().sum().reset_index()
-    missing_values_table.columns = ['Column', 'Missing count']
-    missing_values_table['Missing percentage'] = (missing_values_table['Missing count'] / len(df)) * 100
-
-    # Log missing values summary
-    logger.info("Missing values summary:")
-    logger.info(f"\n{missing_values_table}")
-
-    # Save the missing values report if a path is provided
-    if save_path:
-        try:
-            missing_values_table.to_csv(save_path, index=False)
-            logger.info(f"Missing values report saved to {save_path}")
-        except Exception as e:
-            logger.error(f"Failed to save missing values report: {e}")
-
-    return missing_values_table
-
-
-# Extract ground truth data for a specific plot
-def get_plot_ground_truth(field_survey, plot_id):
-    """
-    Extracts ground truth data for a specific plot.
-
-    Parameters:
-    - field_survey (GeoDataFrame): The field survey data.
-    - plot_id (int): The ID of the plot.
-
-    Returns:
-    - np.ndarray: Ground truth tree coordinates and heights for the plot.
-    """
-    logger.info(f"Extracting ground truth data for plot {plot_id}.")
-    if plot_id not in field_survey["plot"].unique():
-        logger.warning(f"Plot ID {plot_id} not found in the dataset.")
-        return np.array([])
-
-    plot_data = field_survey[field_survey["plot"] == plot_id]
-
-    # Ensure only trees with valid coordinates and heights are included
-    ground_truth = plot_data[["geometry", "height"]].dropna()
-    ground_truth_array = ground_truth.apply(
-        lambda row: [row.geometry.x, row.geometry.y, row.height], axis=1
-    ).to_list()
-
-    logger.info(f"Found {len(ground_truth_array)} ground truth trees for plot {plot_id}.")
-    return np.array(ground_truth_array)
-
-
-# Load, clean, and prepare the field survey data
-def process_field_survey_geojson(
-    path, drop_columns=None, missing_values_report_path=None
-):
-    """
-    Loads, cleans, and prepares the field survey data.
-
-    Parameters:
-    - path (str): Path to the GeoJSON file.
-    - drop_columns (list, optional): Columns to drop from the data.
-    - missing_values_report_path (str, optional): Path to save missing values report.
-
-    Returns:
-    - GeoDataFrame: Cleaned and processed field survey data.
-    """
-    field_survey = load_field_survey_geojson(path)
-    if field_survey.empty:
-        logger.error("Field survey data is empty after loading. Exiting process.")
-        return field_survey
-
-    # Report missing values
-    if missing_values_report_path:
-        report_field_survey_geojson_missing_values(
-            field_survey, save_path=missing_values_report_path
-        )
-
-    # Clean field survey data
-    if drop_columns:
-        field_survey = clean_field_survey_geojson(field_survey, drop_columns)
-
-    return field_survey
+    logger.info("Data processing complete!")

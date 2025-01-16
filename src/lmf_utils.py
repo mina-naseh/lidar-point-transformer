@@ -1,5 +1,38 @@
 LAS_GROUND_CLASS = 2  # Classification code for ground points in LAS files
 
+
+
+
+
+# Extract ground truth data for a specific plot
+def get_plot_ground_truth(field_survey, plot_id):
+    """
+    Extracts ground truth data for a specific plot.
+
+    Parameters:
+    - field_survey (GeoDataFrame): The field survey data.
+    - plot_id (int): The ID of the plot.
+
+    Returns:
+    - np.ndarray: Ground truth tree coordinates and heights for the plot.
+    """
+    logger.info(f"Extracting ground truth data for plot {plot_id}.")
+    if plot_id not in field_survey["plot"].unique():
+        logger.warning(f"Plot ID {plot_id} not found in the dataset.")
+        return np.array([])
+
+    plot_data = field_survey[field_survey["plot"] == plot_id]
+
+    # Ensure only trees with valid coordinates and heights are included
+    ground_truth = plot_data[["geometry", "height"]].dropna()
+    ground_truth_array = ground_truth.apply(
+        lambda row: [row.geometry.x, row.geometry.y, row.height], axis=1
+    ).to_list()
+
+    logger.info(f"Found {len(ground_truth_array)} ground truth trees for plot {plot_id}.")
+    return np.array(ground_truth_array)
+
+
 def local_maxima_filter(cloud, window_size, height_threshold):
     """
     Detects local maxima in the point cloud with a fixed window size.
