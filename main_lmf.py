@@ -1,127 +1,43 @@
 import os
 import logging
 import geopandas as gpd
-from src.field_survey_geojson_utils import (
-    process_field_survey_geojson,
-)
-from src.point_cloud_utils import (
-    process_and_visualize_multiple_point_clouds,
-    process_and_visualize_multiple_point_clouds_with_lmf,
+from src.lmf_utils import (
     process_all_las_files_with_ground_truth
 )
 
-# --- Configure Logging ---
-LOGS_DIR = "./logs"
-LOG_FILE = os.path.join(LOGS_DIR, "workflow.log")
+DATA_DIR = "./data"
+ALS_PREPROCESSED_DIR = os.path.join(DATA_DIR, "als_preprocessed")
+RESULTS_DIR = "./results_lmf"
+FIELD_SURVEY_PATH = os.path.join(DATA_DIR, "field_survey.geojson")
 
-os.makedirs(LOGS_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO,
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(LOG_FILE, mode="w")
-    ]
 )
 logger = logging.getLogger(__name__)
 
-# --- Constants ---
-DATA_DIR = "./data"
-
-RESULTS_DIR = "./results"
-FIELD_SURVEY_PATH = os.path.join(DATA_DIR, "field_survey.geojson")
-TIF_DIR = os.path.join(DATA_DIR, "ortho")
-LAS_DIR = os.path.join(DATA_DIR, "als")
-DROP_COLUMNS = ["tree_no"]
-
-# Ensure Output Directories Exist
-
-os.makedirs(RESULTS_DIR, exist_ok=True)
-
-
-# --- Utility Functions ---
-def validate_path(path, path_type="file"):
-    """
-    Validates if a file or directory exists.
-
-    Parameters:
-    - path (str): Path to validate.
-    - path_type (str): Either "file" or "directory". Default is "file".
-
-    Returns:
-    - bool: True if the path exists, False otherwise.
-    """
-    if path_type == "file" and not os.path.isfile(path):
-        logger.error(f"Required file not found: {path}")
-        return False
-    elif path_type == "directory" and not os.path.isdir(path):
-        logger.error(f"Required directory not found: {path}")
-        return False
-    return True
-
-
 def main():
-    try:
-        logger.info("Starting the main workflow...")
+    if not os.path.exists(FIELD_SURVEY_PATH):
+        logger.error(f"Ground truth file not found at {FIELD_SURVEY_PATH}. Exiting...")
+        return
+    ground_truth_data = gpd.read_file(FIELD_SURVEY_PATH)
 
-        # Validate paths
-        if not all([
-            validate_path(FIELD_SURVEY_PATH, path_type="file"),
-            validate_path(TIF_DIR, path_type="directory"),
-            validate_path(LAS_DIR, path_type="directory")
-        ]):
-            logger.error("One or more required paths are missing. Exiting workflow.")
-            return
+    logger.info("Starting Local Maxima Filtering pipeline...")
+    metrics_summary = process_all_las_files_with_ground_truth(
+        las_dir=ALS_PREPROCESSED_DIR,
+        ground_truth_data=ground_truth_data,
+        save_dir=RESULTS_DIR,
+        max_distance=5.0,
+        max_height_difference=3.0, 
+        window_size=2.0  
+    )
 
-
-        # # --- Step 5: Process Point Cloud Data with LMF ---
-        # try:
-        #     logger.info("Processing and visualizing point cloud data with Local Maxima Filtering...")
-        #     process_and_visualize_multiple_point_clouds_with_lmf(
-        #         las_dir=LAS_DIR,
-        #         save_dir=RESULTS_DIR,
-        #         apply_dbscan=True,
-        #         eps=1.0,
-        #         min_samples=5,
-        #         window_size=2,
-        #         height_threshold=1
-        #     )
-        # except Exception as e:
-        #     logger.error(f"Error during LMF processing: {e}", exc_info=True)
-
-        # # --- Step 6: Match Detected Trees with Ground Truth ---
-        # try:
-        #     logger.info("Loading ground truth data...")
-        #     ground_truth_data = gpd.read_file(FIELD_SURVEY_PATH)
-
-        #     logger.info("Processing LAS files with ground truth matching and calculating metrics...")
-        #     metrics_summary = process_all_las_files_with_ground_truth(
-        #         las_dir=LAS_DIR,
-        #         ground_truth_data=ground_truth_data,
-        #         save_dir=RESULTS_DIR,
-        #         max_distance=5.0,
-        #         max_height_difference=3.0,
-        #         window_size=2.0,
-        #         height_threshold=3.0
-        #     )
-
-        #     if not metrics_summary.empty:
-        #         metrics_summary_path = os.path.join(RESULTS_DIR, "detection_metrics_summary.csv")
-        #         metrics_summary.to_csv(metrics_summary_path, index=False)
-        #         logger.info(f"Metrics summary saved to {metrics_summary_path}.")
-        #     else:
-        #         logger.warning("No metrics were calculated.")
-        # except Exception as e:
-        #     logger.error(f"Error during ground truth matching: {e}", exc_info=True)
-
-
-
-        logger.info("Workflow complete!")
-
-    except Exception as e:
-        logger.error(f"An error occurred during the workflow: {e}", exc_info=True)
-
+    if metrics_summary.empty:
+        logger.warning("No metrics were generated. Please check the input data.")
+    else:
+        logger.info("Detection metrics summary saved to results directory.")
 
 if __name__ == "__main__":
     main()

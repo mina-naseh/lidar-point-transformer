@@ -1,235 +1,101 @@
-LAS_GROUND_CLASS = 2  # Classification code for ground points in LAS files
+import os
+import numpy as np
+import pandas as pd
+import scipy.spatial
+from shapely.geometry import Point
+import geopandas as gpd
+import logging
+import matplotlib.pyplot as plt
 
 
+LAS_GROUND_CLASS = 2
+
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
 
-
-# Extract ground truth data for a specific plot
-def get_plot_ground_truth(field_survey, plot_id):
-    """
-    Extracts ground truth data for a specific plot.
-
-    Parameters:
-    - field_survey (GeoDataFrame): The field survey data.
-    - plot_id (int): The ID of the plot.
-
-    Returns:
-    - np.ndarray: Ground truth tree coordinates and heights for the plot.
-    """
-    logger.info(f"Extracting ground truth data for plot {plot_id}.")
-    if plot_id not in field_survey["plot"].unique():
-        logger.warning(f"Plot ID {plot_id} not found in the dataset.")
-        return np.array([])
-
-    plot_data = field_survey[field_survey["plot"] == plot_id]
-
-    # Ensure only trees with valid coordinates and heights are included
-    ground_truth = plot_data[["geometry", "height"]].dropna()
-    ground_truth_array = ground_truth.apply(
-        lambda row: [row.geometry.x, row.geometry.y, row.height], axis=1
-    ).to_list()
-
-    logger.info(f"Found {len(ground_truth_array)} ground truth trees for plot {plot_id}.")
-    return np.array(ground_truth_array)
-
-
-def local_maxima_filter(cloud, window_size, height_threshold):
+def local_maxima_filter(cloud, window_size):
     """
     Detects local maxima in the point cloud with a fixed window size.
 
     Parameters:
-    - cloud (numpy.ndarray): Point cloud data (X, Y, Z, classification).
+    - cloud (numpy.ndarray): Preprocessed vegetation point cloud (X, Y, Z).
     - window_size (float): Radius of the neighborhood to consider for local maxima.
-    - height_threshold (float): Minimum height threshold for local maxima detection.
 
     Returns:
-    - numpy.ndarray: Detected tree locations and heights (X, Y, Z, classification).
+    - numpy.ndarray: Detected tree locations and heights (X, Y, Z).
     """
-    # Validate input
     if not isinstance(cloud, np.ndarray):
         raise TypeError(f"Cloud needs to be a numpy array, not {type(cloud)}")
     if cloud.size == 0:
         logger.warning("Point cloud is empty. Returning empty array.")
         return np.array([])
 
-    # Filter points above the height threshold
-    filtered_cloud = cloud[cloud[:, 2] > height_threshold]
-    logger.info(f"Filtered {len(filtered_cloud)} points above height threshold {height_threshold}.")
-
-    if filtered_cloud.size == 0:
-        logger.warning("No points remain after height filtering. Returning empty array.")
-        return np.array([])
-
-    # Initialize KDTree for neighborhood queries (use full point: X, Y, Z)
-    tree = scipy.spatial.KDTree(data=filtered_cloud)  # Full 3D KDTree (X, Y, Z)
-    seen_mask = np.zeros(filtered_cloud.shape[0], dtype=bool)
+    # Initialize KDTree for neighborhood queries
+    tree = scipy.spatial.KDTree(data=cloud)
+    seen_mask = np.zeros(cloud.shape[0], dtype=bool)
     local_maxima = []
 
     # Detect local maxima
-    for i, point in enumerate(filtered_cloud):
+    for i, point in enumerate(cloud):
         if seen_mask[i]:
             continue
 
         # Find neighbors within the specified window size
-        neighbor_indices = tree.query_ball_point(point, window_size)  # 3D spatial query
-        if not neighbor_indices:
-            continue
+        neighbor_indices = tree.query_ball_point(point, window_size)
+        highest_neighbor = neighbor_indices[cloud[neighbor_indices, 2].argmax()]
+        seen_mask[neighbor_indices] = True
+        seen_mask[highest_neighbor] = False
 
-        # Find the index of the highest neighbor
-        neighbor_heights = filtered_cloud[neighbor_indices, 2]
-        highest_index = neighbor_indices[np.argmax(neighbor_heights)]
-
-        # Mark all neighbors except the highest neighbor as seen
-        for neighbor_index in neighbor_indices:
-            if neighbor_index != highest_index:
-                seen_mask[neighbor_index] = True
-
-        # If the current point is the local maximum, record it
-        if i == highest_index:
+        if i == highest_neighbor:
             local_maxima.append(i)
 
     logger.info(f"Detected {len(local_maxima)} local maxima (trees).")
-    return filtered_cloud[local_maxima]
+    return cloud[local_maxima]
 
 
-def process_point_cloud_with_lmf(points, ground_points, window_size, height_threshold):
+def process_point_cloud_with_lmf(points, window_size):
     """
-    Processes a point cloud with height normalization and local maxima filtering.
+    Processes a preprocessed point cloud with local maxima filtering.
 
     Parameters:
-    - points (numpy.ndarray): Full point cloud data (X, Y, Z, classification).
-    - ground_points (numpy.ndarray): Ground points data (X, Y, Z).
+    - points (numpy.ndarray): Preprocessed vegetation points (X, Y, Z).
     - window_size (float): Radius for local maxima detection.
-    - height_threshold (float): Minimum height threshold for local maxima detection.
 
     Returns:
-    - numpy.ndarray: Detected tree locations and heights (X, Y, Z, classification).
+    - numpy.ndarray: Detected tree locations and heights (X, Y, Z).
     """
     if points.size == 0:
         logger.warning("Point cloud is empty. Skipping processing.")
         return np.array([])
 
-    if ground_points.size == 0:
-        logger.warning("Ground points are empty. Returning original points.")
-        return np.array([])
-
-    # Normalize heights
-    logger.info(f"Starting height normalization for {len(points)} points.")
-    normalized_points = normalize_cloud_height(points, ground_points)
-    logger.info(f"Normalized heights: min={normalized_points[:, 2].min()}, "
-                f"max={normalized_points[:, 2].max()}, "
-                f"mean={normalized_points[:, 2].mean()}")
-
     # Apply Local Maxima Filtering
-    logger.info(f"Applying Local Maxima Filtering with window_size={window_size}, height_threshold={height_threshold}.")
-    detected_trees = local_maxima_filter(normalized_points, window_size, height_threshold)
+    logger.info(f"Applying Local Maxima Filtering with window_size={window_size}.")
+    detected_trees = local_maxima_filter(points, window_size)
     logger.info(f"Local Maxima Filtering complete. Detected {len(detected_trees)} trees.")
 
     return detected_trees
 
 
-# --- Updated Processing Pipeline ---
-def process_and_visualize_multiple_point_clouds_with_lmf(
-    las_dir, save_dir=None, apply_dbscan=False, eps=1.0, min_samples=5,
-    window_size=2.0, height_threshold=3.0, percentile=None
-):
+def transform_ground_truth(ground_truth):
     """
-    Processes and visualizes multiple LAS files with optional DBSCAN and LMF.
+    Transforms ground truth GeoDataFrame to a NumPy array for processing.
 
     Parameters:
-    - las_dir (str): Directory containing LAS files.
-    - save_dir (str, optional): Directory to save plots and results.
-    - apply_dbscan (bool): Whether to apply DBSCAN clustering.
-    - eps (float): Maximum distance for DBSCAN clustering.
-    - min_samples (int): Minimum samples for DBSCAN clustering.
-    - window_size (float): Radius for local maxima detection.
-    - height_threshold (float): Minimum height threshold for LMF.
-    - percentile (float, optional): Percentile of Z-values to compute threshold.
+    - ground_truth (GeoDataFrame): Ground truth data.
 
     Returns:
-    - None: Displays or saves the plots and results.
+    - np.ndarray: Transformed ground truth data as a NumPy array.
     """
-    # Collect all LAS files from the directory
-    las_files = [os.path.join(las_dir, f) for f in os.listdir(las_dir) if f.endswith(".las")]
-    if not las_files:
-        logger.warning(f"No LAS files found in directory: {las_dir}")
-        return
-
-    for file_path in sorted(las_files):
-        try:
-            plot_number = int(os.path.basename(file_path).split("_")[1].split(".")[0])
-        except ValueError:
-            logger.error(f"Could not extract plot number from file {file_path}. Skipping...")
-            continue
-
-        logger.info(f"Processing {os.path.basename(file_path)} (Plot {plot_number})...")
-
-        # Load LAS file
-        las = laspy.read(file_path)
-
-        # Separate ground and non-ground points
-        try:
-            ground_points = las.xyz[las.classification == LAS_GROUND_CLASS]
-            non_ground_points = las.xyz[las.classification != LAS_GROUND_CLASS]
-        except AttributeError:
-            logger.error(f"File {file_path} does not contain classification data. Skipping...")
-            continue
-
-        logger.info(f"Ground points: {len(ground_points)}, Non-ground points: {len(non_ground_points)}")
-
-        if non_ground_points.size == 0 or ground_points.size == 0:
-            logger.warning(f"No valid points found in {file_path}. Skipping...")
-            continue
-
-        # Apply height filtering (percentile or fixed threshold)
-        non_ground_points = filter_points_by_height(non_ground_points, height_threshold=height_threshold, percentile=percentile)
-        if non_ground_points.size == 0:
-            logger.warning(f"No points remaining after height filtering for plot_{plot_number}. Skipping...")
-            continue
-
-        # Optional DBSCAN noise removal
-        if apply_dbscan:
-            original_count = len(non_ground_points)
-            non_ground_points = remove_noise_with_dbscan(non_ground_points, eps=eps, min_samples=min_samples)
-            # logger.info(f"DBSCAN retained {len(non_ground_points)} points out of {original_count}.")
-
-        # Apply Local Maxima Filtering (LMF)
-        detected_trees = process_point_cloud_with_lmf(
-            points=non_ground_points,
-            ground_points=ground_points,
-            window_size=window_size,
-            height_threshold=height_threshold
-        )
-
-        # Save detected tree locations as GeoJSON
-        detected_trees_gdf = gpd.GeoDataFrame(
-            data={"height": detected_trees[:, 2]},
-            geometry=gpd.points_from_xy(detected_trees[:, 0], detected_trees[:, 1], crs="EPSG:32640")
-        )
-        if save_dir:
-            geojson_path = os.path.join(save_dir, f"detected_trees_plot_{plot_number}_lmf.geojson")
-            detected_trees_gdf.to_file(geojson_path, driver="GeoJSON")
-            logger.info(f"Detected trees saved to {geojson_path}")
-
-        # Visualize the filtered point cloud and detected trees
-        fig, ax = plt.subplots(figsize=(10, 8))
-        ax.scatter(non_ground_points[:, 0], non_ground_points[:, 1], c=non_ground_points[:, 2], s=1, cmap="viridis", label="Point Cloud")
-        ax.scatter(detected_trees[:, 0], detected_trees[:, 1], color="red", s=10, label="Detected Trees")
-        ax.set_title(f"Point Cloud with Detected Trees - Plot {plot_number}")
-        ax.legend()
-        plt.tight_layout()
-
-        if save_dir:
-            plot_path = os.path.join(save_dir, f"plot_{plot_number}_lmf.png")
-            plt.savefig(plot_path, bbox_inches="tight")
-            logger.info(f"Plot saved to {plot_path}")
-        else:
-            plt.show()
-        plt.close()
-
-
-# --- checks ---
-
+    # Create a copy to avoid SettingWithCopyWarning
+    ground_truth = ground_truth.copy()
+    ground_truth["geometry.x"] = ground_truth.geometry.x
+    ground_truth["geometry.y"] = ground_truth.geometry.y
+    return ground_truth[["geometry.x", "geometry.y", "height"]].to_numpy()
 
 
 def match_candidates(
@@ -302,6 +168,48 @@ def match_candidates(
     logger.info(f"Matching complete. Total matches: {len(matches)}")
     return matches
 
+def calculate_detection_metrics(matches):
+    """
+    Calculates detection metrics (precision, recall, F1-score) from match results.
+
+    Parameters:
+    - matches (list): Match results from match_candidates.
+
+    Returns:
+    - dict: Precision, recall, F1-score, and mean distance.
+    """
+    if not matches:
+        logger.warning("No matches provided for metric calculation.")
+        return {"precision": 0, "recall": 0, "f1_score": 0, "mean_distance": None}
+
+    # Calculate true positives, false positives, and false negatives
+    tp = sum(1 for m in matches if m["ground_truth"] is not None and m["candidate"] is not None)
+    fp = sum(1 for m in matches if m["ground_truth"] is None and m["candidate"] is not None)
+    fn = sum(1 for m in matches if m["ground_truth"] is not None and m["candidate"] is None)
+
+    # Calculate metrics
+    precision = tp / (tp + fp) if tp + fp > 0 else 0
+    recall = tp / (tp + fn) if tp + fn > 0 else 0
+    f1 = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
+    mean_distance = (
+        np.mean([m["distance"] for m in matches if m["distance"] is not None])
+        if tp > 0 else None
+    )
+
+    # Log calculated metrics
+    logger.info(f"Metrics calculated: TP={tp}, FP={fp}, FN={fn}")
+    logger.info(f"Precision: {precision:.3f}, Recall: {recall:.3f}, F1-Score: {f1:.3f}")
+    if mean_distance is not None:
+        logger.info(f"Mean Distance: {mean_distance:.3f}")
+    else:
+        logger.info("Mean Distance: None (No true positives)")
+
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1_score": f1,
+        "mean_distance": mean_distance,
+    }
 
 def visualize_detection_results(
     detected_trees, ground_truth, matches, save_path=None
@@ -379,50 +287,114 @@ def visualize_detection_results(
 
     plt.close()
 
-
-def calculate_detection_metrics(matches):
+def get_plot_ground_truth(ground_truth_data, plot_id):
     """
-    Calculates detection metrics (precision, recall, F1-score) from match results.
+    Extracts and transforms ground truth data for a specific plot.
 
     Parameters:
-    - matches (list): Match results from match_candidates.
+    - ground_truth_data (GeoDataFrame): Ground truth data with tree locations.
+    - plot_id (int): ID of the plot.
 
     Returns:
-    - dict: Precision, recall, F1-score, and mean distance.
+    - np.ndarray: Transformed ground truth data as a NumPy array.
     """
-    if not matches:
-        logger.warning("No matches provided for metric calculation.")
-        return {"precision": 0, "recall": 0, "f1_score": 0, "mean_distance": None}
+    plot_data = ground_truth_data[ground_truth_data["plot"] == plot_id]
+    if plot_data.empty:
+        logger.warning(f"No ground truth data for plot {plot_id}. Skipping...")
+        return np.array([])
+    return transform_ground_truth(plot_data)
 
-    # Calculate true positives, false positives, and false negatives
-    tp = sum(1 for m in matches if m["ground_truth"] is not None and m["candidate"] is not None)
-    fp = sum(1 for m in matches if m["ground_truth"] is None and m["candidate"] is not None)
-    fn = sum(1 for m in matches if m["ground_truth"] is not None and m["candidate"] is None)
+def detect_trees(vegetation_points, ground_points, window_size):
+    """
+    Detects trees using Local Maxima Filtering (LMF).
 
-    # Calculate metrics
-    precision = tp / (tp + fp) if tp + fp > 0 else 0
-    recall = tp / (tp + fn) if tp + fn > 0 else 0
-    f1 = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
-    mean_distance = (
-        np.mean([m["distance"] for m in matches if m["distance"] is not None])
-        if tp > 0 else None
+    Parameters:
+    - vegetation_points (np.ndarray): Preprocessed vegetation points (X, Y, Z).
+    - ground_points (np.ndarray): Preprocessed ground points (X, Y, Z).
+    - window_size (float): Radius for local maxima detection.
+
+    Returns:
+    - np.ndarray: Detected tree locations and heights.
+    """
+    if vegetation_points.size == 0:
+        logger.warning("No vegetation points provided for tree detection.")
+        return np.array([])
+
+    detected_trees = process_point_cloud_with_lmf(
+        points=vegetation_points,
+        window_size=window_size
+    )
+    logger.info(f"Detected {len(detected_trees)} trees using LMF.")
+    return detected_trees
+
+def save_detected_trees_as_geojson(detected_trees, plot_number, save_dir, crs="EPSG:32640"):
+    """
+    Saves detected tree locations as a GeoJSON file.
+
+    Parameters:
+    - detected_trees (np.ndarray): Detected tree locations and heights (X, Y, Z).
+    - plot_number (int): Plot number for naming the GeoJSON file.
+    - save_dir (str): Directory to save the GeoJSON file.
+    - crs (str): Coordinate Reference System for the GeoJSON file (default: EPSG:32640).
+
+    Returns:
+    - None
+    """
+    if detected_trees.size == 0:
+        logger.warning(f"No detected trees for plot {plot_number}. Skipping GeoJSON saving...")
+        return
+
+    # Convert detected trees to a GeoDataFrame
+    detected_trees_gdf = gpd.GeoDataFrame(
+        data={"height": detected_trees[:, 2]},
+        geometry=gpd.points_from_xy(detected_trees[:, 0], detected_trees[:, 1]),
+        crs=crs,
     )
 
-    # Log calculated metrics
-    logger.info(f"Metrics calculated: TP={tp}, FP={fp}, FN={fn}")
-    logger.info(f"Precision: {precision:.3f}, Recall: {recall:.3f}, F1-Score: {f1:.3f}")
-    if mean_distance is not None:
-        logger.info(f"Mean Distance: {mean_distance:.3f}")
-    else:
-        logger.info("Mean Distance: None (No true positives)")
+    # Save to GeoJSON
+    geojson_path = os.path.join(save_dir, f"{plot_number}_detected_trees.geojson")
+    detected_trees_gdf.to_file(geojson_path, driver="GeoJSON")
+    logger.info(f"Detected trees saved to {geojson_path}")
 
-    return {
-        "precision": precision,
-        "recall": recall,
-        "f1_score": f1,
-        "mean_distance": mean_distance,
-    }
+def plot_point_cloud_with_detected_trees(non_ground_points, detected_trees, plot_name, save_dir):
+    """
+    Plots the point cloud with detected trees overlaid.
 
+    Parameters:
+    - non_ground_points (np.ndarray): Vegetation point cloud (X, Y, Z).
+    - detected_trees (np.ndarray): Detected tree locations and heights (X, Y, Z).
+    - plot_name (str): Name of the plot for saving.
+    - save_dir (str): Directory to save the plot.
+
+    Returns:
+    - None
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.scatter(
+        non_ground_points[:, 0],
+        non_ground_points[:, 1],
+        c=non_ground_points[:, 2],
+        s=1,
+        cmap="viridis",
+        label="Point Cloud",
+    )
+    ax.scatter(
+        detected_trees[:, 0],
+        detected_trees[:, 1],
+        color="red",
+        s=10,
+        label="Detected Trees",
+    )
+    ax.set_title(f"Point Cloud with Detected Trees - {plot_name}")
+    ax.legend()
+    plt.tight_layout()
+
+    plot_path = os.path.join(save_dir, f"{plot_name}_point_cloud_with_trees.png")
+    plt.savefig(plot_path, bbox_inches="tight")
+    logger.info(f"Point cloud with detected trees plot saved to {plot_path}")
+    plt.close()
 
 
 def process_all_las_files_with_ground_truth(
@@ -432,75 +404,44 @@ def process_all_las_files_with_ground_truth(
     max_distance=5.0,
     max_height_difference=3.0,
     window_size=2.0,
-    height_threshold=3.0,
 ):
-    """
-    Processes all LAS files in a directory, matches detected trees with ground truth,
-    and calculates detection metrics.
+    plots_dir = os.path.join(save_dir, "plots")
+    geojson_dir = os.path.join(save_dir, "geojson")
+    point_cloud_with_trees_dir = os.path.join(save_dir, "point_cloud_with_trees")
+    os.makedirs(plots_dir, exist_ok=True)
+    os.makedirs(geojson_dir, exist_ok=True)
+    os.makedirs(point_cloud_with_trees_dir, exist_ok=True)
 
-    Parameters:
-    - las_dir (str): Directory containing LAS files.
-    - ground_truth_data (GeoDataFrame): Ground truth data with tree locations.
-    - save_dir (str): Directory to save results and visualizations.
-    - max_distance (float): Maximum distance for matching candidates to ground truth.
-    - max_height_difference (float): Maximum height difference for matching.
-    - window_size (float): Window size for Local Maxima Filtering (LMF).
-    - height_threshold (float): Height threshold for LMF.
-
-    Returns:
-    - pd.DataFrame: Summary of detection metrics for all plots.
-    """
-    las_files = sorted(glob.glob(os.path.join(las_dir, "*.las")))
-    if not las_files:
-        logger.warning(f"No LAS files found in directory: {las_dir}")
-        return pd.DataFrame()
-
+    plot_dirs = sorted(os.listdir(las_dir))
     metrics_list = []
 
-    for las_file in las_files:
-        try:
-            # Extract plot number
-            plot_number = int(os.path.basename(las_file).split("_")[1].split(".")[0])
-        except (IndexError, ValueError):
-            logger.error(f"Invalid file name format: {las_file}. Skipping...")
+    for plot_dir in plot_dirs:
+        plot_name = os.path.basename(plot_dir)
+
+        # Load preprocessed ground and vegetation points
+        ground_points = np.load(os.path.join(las_dir, plot_dir, f"{plot_name}_ground.npy"))
+        vegetation_points = np.load(os.path.join(las_dir, plot_dir, f"{plot_name}_vegetation.npy"))
+
+        logger.info(f"Processing {plot_name}...")
+        if vegetation_points.size == 0:
+            logger.warning(f"No vegetation points found for {plot_name}. Skipping...")
             continue
 
-        logger.info(f"Processing {os.path.basename(las_file)} (Plot {plot_number})...")
+        # Detect trees
+        detected_trees = detect_trees(vegetation_points, ground_points, window_size)
 
-        # Load LAS file
-        points = load_las_file(las_file)
-        if points.size == 0:
-            logger.warning(f"No points in LAS file: {las_file}. Skipping...")
-            continue
+        # Save detected trees as GeoJSON
+        save_detected_trees_as_geojson(detected_trees, plot_name, geojson_dir)
 
-        # Split points based on classification
-        ground_points = points[points[:, -1] == 2]  # Ground points
-        non_ground_points = points[points[:, -1] == 5]  # High vegetation points
-
-        logger.info(f"Number of ground points: {len(ground_points)}")
-        logger.info(f"Number of high vegetation points: {len(non_ground_points)}")
-
-        if non_ground_points.size == 0 or ground_points.size == 0:
-            logger.warning(f"No valid points in {os.path.basename(las_file)}. Skipping...")
-            continue
-
-        # Process using Local Maxima Filtering
-        detected_trees = process_point_cloud_with_lmf(
-            points=non_ground_points,
-            ground_points=ground_points,
-            window_size=window_size,
-            height_threshold=height_threshold,
+        # Plot point cloud with detected trees
+        plot_point_cloud_with_detected_trees(
+            vegetation_points, detected_trees, plot_name, point_cloud_with_trees_dir
         )
-        logger.info(f"Detected {len(detected_trees)} trees using LMF.")
 
         # Match detected trees with ground truth
-        plot_ground_truth = ground_truth_data[ground_truth_data["plot"] == plot_number].copy()
-
-        if plot_ground_truth.empty:
-            logger.warning(f"No ground truth data for plot {plot_number}. Skipping...")
+        plot_ground_truth_np = get_plot_ground_truth(ground_truth_data, int(plot_name.split("_")[1]))
+        if plot_ground_truth_np.size == 0:
             continue
-
-        plot_ground_truth_np = transform_ground_truth(plot_ground_truth)
 
         matches = match_candidates(
             ground_truth=plot_ground_truth_np,
@@ -509,32 +450,18 @@ def process_all_las_files_with_ground_truth(
             max_height_difference=max_height_difference,
         )
 
+        # Calculate metrics
         metrics = calculate_detection_metrics(matches)
-        metrics["plot"] = plot_number
+        metrics["plot"] = plot_name
         metrics_list.append(metrics)
 
-        # Visualize detection results
-        save_path = os.path.join(save_dir, f"plot_{plot_number}_detection_results.png")
-        visualize_detection_results(detected_trees, plot_ground_truth_np, matches, save_path=save_path)
+        # Save detection visualization
+        plot_path = os.path.join(plots_dir, f"{plot_name}_detection_results.png")
+        visualize_detection_results(detected_trees, plot_ground_truth_np, matches, save_path=plot_path)
 
-    # Save and summarize metrics
+    # Save metrics summary
     metrics_summary = pd.DataFrame(metrics_list)
     metrics_summary.to_csv(os.path.join(save_dir, "detection_metrics.csv"), index=False)
     logger.info("Detection metrics summary saved.")
 
     return metrics_summary
-
-
-def transform_ground_truth(ground_truth):
-    """
-    Transforms ground truth GeoDataFrame to a NumPy array for processing.
-
-    Parameters:
-    - ground_truth (GeoDataFrame): Ground truth data.
-
-    Returns:
-    - np.ndarray: Transformed ground truth data as a NumPy array.
-    """
-    ground_truth["geometry.x"] = ground_truth.geometry.x
-    ground_truth["geometry.y"] = ground_truth.geometry.y
-    return ground_truth[["geometry.x", "geometry.y", "height"]].to_numpy()
