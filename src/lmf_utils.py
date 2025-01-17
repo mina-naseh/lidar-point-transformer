@@ -97,6 +97,22 @@ def transform_ground_truth(ground_truth):
     ground_truth["geometry.y"] = ground_truth.geometry.y
     return ground_truth[["geometry.x", "geometry.y", "height"]].to_numpy()
 
+def crop_by_other(points: np.ndarray, other: np.ndarray) -> np.ndarray:
+    """
+    Crop points by the convex hull of another set of points.
+
+    Parameters:
+    - points (np.ndarray): Array of points to crop (X, Y, Z, ...).
+    - other (np.ndarray): Array of points defining the crop boundary (X, Y, Z, ...).
+
+    Returns:
+    - np.ndarray: Cropped points.
+    """
+    hull = scipy.spatial.ConvexHull(other[:, :2])  # Convex hull on the X, Y coordinates
+    vertex_points = hull.points[hull.vertices]  # Extract the vertices of the hull
+    delaunay = scipy.spatial.Delaunay(vertex_points)  # Create Delaunay triangulation
+    within_hull = delaunay.find_simplex(points[:, :2]) >= 0  # Check points within the hull
+    return points[within_hull]
 
 def match_candidates(
     ground_truth: np.ndarray,
@@ -430,6 +446,15 @@ def process_all_las_files_with_ground_truth(
         # Detect trees
         detected_trees = detect_trees(vegetation_points, ground_points, window_size)
 
+        # Crop detected trees by the extent of the ground truth
+        plot_ground_truth_np = get_plot_ground_truth(ground_truth_data, int(plot_name.split("_")[1]))
+        if plot_ground_truth_np.size == 0:
+            logger.warning(f"No ground truth for {plot_name}. Skipping...")
+            continue
+
+        detected_trees = crop_by_other(detected_trees, plot_ground_truth_np)
+        logger.info(f"Detected trees after cropping: {len(detected_trees)}")
+
         # Save detected trees as GeoJSON
         save_detected_trees_as_geojson(detected_trees, plot_name, geojson_dir)
 
@@ -439,10 +464,6 @@ def process_all_las_files_with_ground_truth(
         )
 
         # Match detected trees with ground truth
-        plot_ground_truth_np = get_plot_ground_truth(ground_truth_data, int(plot_name.split("_")[1]))
-        if plot_ground_truth_np.size == 0:
-            continue
-
         matches = match_candidates(
             ground_truth=plot_ground_truth_np,
             candidates=detected_trees,
