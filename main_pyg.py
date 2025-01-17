@@ -8,20 +8,20 @@ import json
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-def main(file_limit=None):
-    # File paths
-    las_dir = "./data/als/"  # Directory containing LAS files
-    geojson_path = "./data/field_survey.geojson"  # Path to GeoJSON file
+npy_dir = "./data/als_preprocessed"
+geojson_path = "./data/field_survey.geojson"
+model_path = "./results_pyg/trained_point_transformer.pth"
+
+def main():
 
     # Step 1: Prepare Data with k-NN Graph Transform
-    print("Preparing data with k-NN graph transform...")
-    pyg_data_list = prepare_data_with_transform(las_dir, geojson_path, k=16, radius=1.0)    
+    print("Preparing data with k-NN graph transform...")  
+    pyg_data_list = prepare_data_with_transform(npy_dir, geojson_path, k=16, radius=1.0)
 
     print(f"Data summary:")
     for idx, data in enumerate(pyg_data_list):
         print(f"Data {idx + 1}: x shape: {data.x.shape}, pos shape: {data.pos.shape}, "
               f"edge_index shape: {data.edge_index.shape}, y shape: {data.y.shape}")
-
 
     # Step 2: Split Data into Train and Test Sets
     split_idx = len(pyg_data_list) // 2
@@ -43,7 +43,6 @@ def main(file_limit=None):
     )
 
     # Step 4: Save the Trained Model
-    model_path = "trained_point_transformer.pth"
     logger.info(f"Saving the trained model to {model_path}...")
     torch.save(model.state_dict(), model_path)
 
@@ -51,9 +50,7 @@ def main(file_limit=None):
     # Test the model and calculate per-file metrics
     file_metrics = test_model_per_file(model, test_loader, device)
 
-    # Save per-file metrics to a JSON file
-    import json
-    with open("test_metrics_per_file.json", "w") as f:
+    with open("./results_pyg/test_metrics_per_file.json", "w") as f:
         json.dump(file_metrics, f, indent=4)
     print("Per-file test metrics saved to test_metrics_per_file.json")
 
@@ -61,5 +58,4 @@ def main(file_limit=None):
     logger.info("Pipeline completed successfully.")
 
 if __name__ == "__main__":
-    # Limit to 3 files for testing the pipeline
-    main(file_limit=None)
+    main()

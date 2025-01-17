@@ -4,28 +4,30 @@ import numpy as np
 from torch_geometric.data import Data
 from torch_geometric.transforms import KNNGraph
 import logging
-import laspy
 import geopandas as gpd
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-def load_las_files(las_dir):
+def load_npy_files(npy_dir):
     """
-    Load all .las files and extract points.
+    Load preprocessed .npy files containing vegetation points from subdirectories.
     """
-    logger.info("Loading .las files...")
-    las_files = [os.path.join(las_dir, f) for f in os.listdir(las_dir) if f.endswith(".las")]
+    logger.info("Loading preprocessed .npy files from subdirectories...")
     points_list = []
-    for las_file in las_files:
-        logger.info(f"Processing {las_file}...")
-        las = laspy.read(las_file)
-        mask = las.classification != 2  # Remove ground points
-        points = np.stack([las.x[mask], las.y[mask], las.z[mask]], axis=1)
-        points_list.append(points)
-    logger.info(f"Loaded {len(points_list)} LAS files.")
+
+    for root, _, files in os.walk(npy_dir):  # Recursively traverse subdirectories
+        for file in files:
+            if file.endswith("_vegetation.npy"):  # Only load vegetation files
+                file_path = os.path.join(root, file)
+                logger.info(f"Loading {file_path}...")
+                points = np.load(file_path)
+                points_list.append(points)
+
+    logger.info(f"Loaded {len(points_list)} vegetation .npy files.")
     return points_list
+
 
 def load_geojson(geojson_path):
     """
@@ -49,15 +51,15 @@ def match_trees_with_points(points_list, geojson_data, radius=1.0):
             distances = np.linalg.norm(points[:, :2] - tree_coords, axis=1)
             labels[distances < radius] = 1.0
         labels_list.append(labels)
-        logger.info(f"Matched trees for LAS file {i + 1}/{len(points_list)}.")
+        logger.info(f"Matched trees for .npy file {i + 1}/{len(points_list)}.")
     return labels_list
 
-def prepare_data_with_transform(las_dir, geojson_path, k=16, radius=1.0):
+def prepare_data_with_transform(npy_dir, geojson_path, k=16, radius=1.0):
     """
     Prepares PyG Data objects with k-NN graph transform for Point Transformer.
     
     Parameters:
-        las_dir (str): Directory containing LAS files.
+        npy_dir (str): Directory containing preprocessed .npy files.
         geojson_path (str): Path to GeoJSON file for labeling.
         k (int): Number of neighbors for k-NN graph.
         radius (float): Radius for tree-label assignment.
@@ -65,7 +67,7 @@ def prepare_data_with_transform(las_dir, geojson_path, k=16, radius=1.0):
     Returns:
         list: List of PyG Data objects.
     """
-    points_list = load_las_files(las_dir)  # Load LAS points
+    points_list = load_npy_files(npy_dir)  # Load preprocessed vegetation points from .npy files
     geojson_data = load_geojson(geojson_path)  # Load GeoJSON
     labels_list = match_trees_with_points(points_list, geojson_data, radius)
 
@@ -90,7 +92,7 @@ def prepare_data_with_transform(las_dir, geojson_path, k=16, radius=1.0):
 
         # Append to the list
         pyg_data_list.append(data)
-        logger.info(f"Prepared PyG Data object for one LAS file with {data.num_nodes} nodes.")
+        logger.info(f"Prepared PyG Data object for one .npy file with {data.num_nodes} nodes.")
 
     logger.info(f"Prepared {len(pyg_data_list)} PyG Data objects.")
     return pyg_data_list
