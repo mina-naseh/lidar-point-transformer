@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 
 LAS_GROUND_CLASS = 2
 
-# Configure logging
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -91,7 +90,6 @@ def transform_ground_truth(ground_truth):
     Returns:
     - np.ndarray: Transformed ground truth data as a NumPy array.
     """
-    # Create a copy to avoid SettingWithCopyWarning
     ground_truth = ground_truth.copy()
     ground_truth["geometry.x"] = ground_truth.geometry.x
     ground_truth["geometry.y"] = ground_truth.geometry.y
@@ -114,6 +112,7 @@ def crop_by_other(points: np.ndarray, other: np.ndarray) -> np.ndarray:
     within_hull = delaunay.find_simplex(points[:, :2]) >= 0  # Check points within the hull
     return points[within_hull]
 
+
 def match_candidates(
     ground_truth: np.ndarray,
     candidates: np.ndarray,
@@ -134,7 +133,6 @@ def match_candidates(
     """
     logger = logging.getLogger(__name__)
 
-    # Handle empty inputs gracefully
     if ground_truth.size == 0:
         logger.warning("No ground truth points provided.")
         return [{"ground_truth": None, "candidate": tuple(cand), "class": "FP", "distance": None} for cand in candidates]
@@ -169,13 +167,11 @@ def match_candidates(
             ground_truth_matched_mask[i] = True
             candidates_matched_mask[j] = True
 
-    # Add unmatched ground truth (FN)
     matches.extend(
         {"ground_truth": tuple(ground_truth[i]), "candidate": None, "class": "FN", "distance": None}
         for i in range(len(ground_truth)) if not ground_truth_matched_mask[i]
     )
 
-    # Add unmatched candidates (FP)
     matches.extend(
         {"ground_truth": None, "candidate": tuple(candidates[j]), "class": "FP", "distance": None}
         for j in range(len(candidates)) if not candidates_matched_mask[j]
@@ -183,6 +179,7 @@ def match_candidates(
 
     logger.info(f"Matching complete. Total matches: {len(matches)}")
     return matches
+
 
 def calculate_detection_metrics(matches):
     """
@@ -198,12 +195,10 @@ def calculate_detection_metrics(matches):
         logger.warning("No matches provided for metric calculation.")
         return {"precision": 0, "recall": 0, "f1_score": 0, "mean_distance": None}
 
-    # Calculate true positives, false positives, and false negatives
     tp = sum(1 for m in matches if m["ground_truth"] is not None and m["candidate"] is not None)
     fp = sum(1 for m in matches if m["ground_truth"] is None and m["candidate"] is not None)
     fn = sum(1 for m in matches if m["ground_truth"] is not None and m["candidate"] is None)
 
-    # Calculate metrics
     precision = tp / (tp + fp) if tp + fp > 0 else 0
     recall = tp / (tp + fn) if tp + fn > 0 else 0
     f1 = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
@@ -212,7 +207,6 @@ def calculate_detection_metrics(matches):
         if tp > 0 else None
     )
 
-    # Log calculated metrics
     logger.info(f"Metrics calculated: TP={tp}, FP={fp}, FN={fn}")
     logger.info(f"Precision: {precision:.3f}, Recall: {recall:.3f}, F1-Score: {f1:.3f}")
     if mean_distance is not None:
@@ -226,6 +220,7 @@ def calculate_detection_metrics(matches):
         "f1_score": f1,
         "mean_distance": mean_distance,
     }
+
 
 def visualize_detection_results(
     detected_trees, ground_truth, matches, save_path=None
@@ -256,7 +251,6 @@ def visualize_detection_results(
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
-    # Scatter plot for ground truth and detected trees
     ax.scatter(
         ground_truth[:, 0], ground_truth[:, 1],
         c="green", label="Ground Truth", s=50, alpha=0.7
@@ -266,7 +260,6 @@ def visualize_detection_results(
         c="red", label="Detected Trees", s=50, alpha=0.7
     )
 
-    # Plot matches with optional distance annotation
     for match in matches:
         if match["distance"] is not None:
             ax.plot(
@@ -274,27 +267,23 @@ def visualize_detection_results(
                 [match["ground_truth"][1], match["candidate"][1]],
                 c="blue", linestyle="--", alpha=0.5,
             )
-            # Optional: annotate with distance
             ax.text(
                 (match["ground_truth"][0] + match["candidate"][0]) / 2,
                 (match["ground_truth"][1] + match["candidate"][1]) / 2,
                 f"{match['distance']:.2f}", fontsize=8, color="blue", alpha=0.7
             )
 
-    # Adjust axis limits dynamically
     all_x = np.concatenate([ground_truth[:, 0], detected_trees[:, 0]])
     all_y = np.concatenate([ground_truth[:, 1], detected_trees[:, 1]])
     ax.set_xlim(all_x.min() - 10, all_x.max() + 10)
     ax.set_ylim(all_y.min() - 10, all_y.max() + 10)
 
-    # Add labels and legend
     ax.set_xlabel("X Coordinate")
     ax.set_ylabel("Y Coordinate")
     ax.legend()
     plt.title("Tree Detection Results")
     plt.tight_layout()
 
-    # Save or show the plot
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
         logger.info(f"Detection results plot saved to {save_path}")
@@ -302,6 +291,7 @@ def visualize_detection_results(
         plt.show()
 
     plt.close()
+
 
 def get_plot_ground_truth(ground_truth_data, plot_id):
     """
@@ -319,6 +309,7 @@ def get_plot_ground_truth(ground_truth_data, plot_id):
         logger.warning(f"No ground truth data for plot {plot_id}. Skipping...")
         return np.array([])
     return transform_ground_truth(plot_data)
+
 
 def detect_trees(vegetation_points, ground_points, window_size):
     """
@@ -343,6 +334,7 @@ def detect_trees(vegetation_points, ground_points, window_size):
     logger.info(f"Detected {len(detected_trees)} trees using LMF.")
     return detected_trees
 
+
 def save_detected_trees_as_geojson(detected_trees, plot_number, save_dir, crs="EPSG:32640"):
     """
     Saves detected tree locations as a GeoJSON file.
@@ -360,17 +352,16 @@ def save_detected_trees_as_geojson(detected_trees, plot_number, save_dir, crs="E
         logger.warning(f"No detected trees for plot {plot_number}. Skipping GeoJSON saving...")
         return
 
-    # Convert detected trees to a GeoDataFrame
     detected_trees_gdf = gpd.GeoDataFrame(
         data={"height": detected_trees[:, 2]},
         geometry=gpd.points_from_xy(detected_trees[:, 0], detected_trees[:, 1]),
         crs=crs,
     )
 
-    # Save to GeoJSON
     geojson_path = os.path.join(save_dir, f"{plot_number}_detected_trees.geojson")
     detected_trees_gdf.to_file(geojson_path, driver="GeoJSON")
     logger.info(f"Detected trees saved to {geojson_path}")
+
 
 def plot_point_cloud_with_detected_trees(non_ground_points, detected_trees, plot_name, save_dir):
     """
@@ -434,7 +425,6 @@ def process_all_las_files_with_ground_truth(
     for plot_dir in plot_dirs:
         plot_name = os.path.basename(plot_dir)
 
-        # Load preprocessed ground and vegetation points
         ground_points = np.load(os.path.join(las_dir, plot_dir, f"{plot_name}_ground.npy"))
         vegetation_points = np.load(os.path.join(las_dir, plot_dir, f"{plot_name}_vegetation.npy"))
 
@@ -443,10 +433,8 @@ def process_all_las_files_with_ground_truth(
             logger.warning(f"No vegetation points found for {plot_name}. Skipping...")
             continue
 
-        # Detect trees
         detected_trees = detect_trees(vegetation_points, ground_points, window_size)
 
-        # Crop detected trees by the extent of the ground truth
         plot_ground_truth_np = get_plot_ground_truth(ground_truth_data, int(plot_name.split("_")[1]))
         if plot_ground_truth_np.size == 0:
             logger.warning(f"No ground truth for {plot_name}. Skipping...")
@@ -455,15 +443,12 @@ def process_all_las_files_with_ground_truth(
         detected_trees = crop_by_other(detected_trees, plot_ground_truth_np)
         logger.info(f"Detected trees after cropping: {len(detected_trees)}")
 
-        # Save detected trees as GeoJSON
         save_detected_trees_as_geojson(detected_trees, plot_name, geojson_dir)
 
-        # Plot point cloud with detected trees
         plot_point_cloud_with_detected_trees(
             vegetation_points, detected_trees, plot_name, point_cloud_with_trees_dir
         )
 
-        # Match detected trees with ground truth
         matches = match_candidates(
             ground_truth=plot_ground_truth_np,
             candidates=detected_trees,
@@ -471,16 +456,13 @@ def process_all_las_files_with_ground_truth(
             max_height_difference=max_height_difference,
         )
 
-        # Calculate metrics
         metrics = calculate_detection_metrics(matches)
         metrics["plot"] = plot_name
         metrics_list.append(metrics)
 
-        # Save detection visualization
         plot_path = os.path.join(plots_dir, f"{plot_name}_detection_results.png")
         visualize_detection_results(detected_trees, plot_ground_truth_np, matches, save_path=plot_path)
 
-    # Save metrics summary
     metrics_summary = pd.DataFrame(metrics_list)
     metrics_summary.to_csv(os.path.join(save_dir, "detection_metrics.csv"), index=False)
     logger.info("Detection metrics summary saved.")

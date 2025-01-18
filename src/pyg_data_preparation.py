@@ -6,7 +6,6 @@ from torch_geometric.transforms import KNNGraph
 import logging
 import geopandas as gpd
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -17,9 +16,9 @@ def load_npy_files(npy_dir):
     logger.info("Loading preprocessed .npy files from subdirectories...")
     points_list = []
 
-    for root, _, files in os.walk(npy_dir):  # Recursively traverse subdirectories
+    for root, _, files in os.walk(npy_dir):
         for file in files:
-            if file.endswith("_vegetation.npy"):  # Only load vegetation files
+            if file.endswith("_vegetation.npy"):
                 file_path = os.path.join(root, file)
                 logger.info(f"Loading {file_path}...")
                 points = np.load(file_path)
@@ -47,7 +46,7 @@ def match_trees_with_points(points_list, geojson_data, radius=1.0):
     for i, points in enumerate(points_list):
         labels = np.zeros(len(points), dtype=np.float32)
         for _, tree in geojson_data.iterrows():
-            tree_coords = np.array(tree.geometry.coords[0])  # Handle 2D coordinates
+            tree_coords = np.array(tree.geometry.coords[0])
             distances = np.linalg.norm(points[:, :2] - tree_coords, axis=1)
             labels[distances < radius] = 1.0
         labels_list.append(labels)
@@ -67,30 +66,20 @@ def prepare_data_with_transform(npy_dir, geojson_path, k=16, radius=1.0):
     Returns:
         list: List of PyG Data objects.
     """
-    points_list = load_npy_files(npy_dir)  # Load preprocessed vegetation points from .npy files
-    geojson_data = load_geojson(geojson_path)  # Load GeoJSON
+    points_list = load_npy_files(npy_dir)
+    geojson_data = load_geojson(geojson_path)
     labels_list = match_trees_with_points(points_list, geojson_data, radius)
 
-    transform = KNNGraph(k=k)  # PyG transform for k-NN graph construction
+    transform = KNNGraph(k=k)
     pyg_data_list = []
 
     for points, labels in zip(points_list, labels_list):
-        coords = torch.tensor(points, dtype=torch.float32)  # 3D coordinates
-        labels = torch.tensor(labels, dtype=torch.float32)  # Binary labels
-
-        # Normalize coordinates for better training stability
+        coords = torch.tensor(points, dtype=torch.float32)
+        labels = torch.tensor(labels, dtype=torch.float32)
         coords = (coords - coords.mean(dim=0)) / coords.std(dim=0)
-
-        # Optional: Extract additional features if available
-        features = coords.clone()  # Replace with actual features if present
-
-        # Create PyG Data object
+        features = coords.clone()
         data = Data(x=features, pos=coords, y=labels)
-
-        # Apply k-NN graph construction
         data = transform(data)
-
-        # Append to the list
         pyg_data_list.append(data)
         logger.info(f"Prepared PyG Data object for one .npy file with {data.num_nodes} nodes.")
 

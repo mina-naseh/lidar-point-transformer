@@ -44,7 +44,6 @@ def inspect_geojson_data(gdf, save_path):
     """
     logger.info("Inspecting GeoJSON data...")
 
-    # Create output directory if not exists
     os.makedirs(save_path, exist_ok=True)
 
     species_counts = gdf["species"].value_counts().reset_index()
@@ -132,7 +131,6 @@ def inspect_all_las_files(las_dir, output_dir):
         inspect_las_file(las_file, output_dir)
 
 
-
 def inspect_las_data(las_dir, save_path):
     """
     Aggregates summary statistics for all LAS files and saves them to a CSV.
@@ -218,6 +216,7 @@ def visualize_raster_images(tif_dir, save_path):
     logger.info(f"Raster images saved in 5x2 layout as {save_path}")
     plt.close()
 
+
 def plot_tree_type_distribution_by_plot(gdf, save_path):
     """
     Plots the distribution of coniferous and deciduous trees across plots and saves the plot.
@@ -256,6 +255,7 @@ def plot_tree_type_distribution_by_plot(gdf, save_path):
 
     save_plot(save_path)
 
+
 def plot_species_distribution_for_all_plots(gdf, output_dir):
     """
     Plots the spatial distribution of species for all plots and saves each plot with a corresponding name.
@@ -291,6 +291,7 @@ def plot_species_distribution_for_all_plots(gdf, output_dir):
         save_path = os.path.join(output_dir, f"species_distribution_plot_{int(plot_number)}.png")
         save_plot(save_path)
 
+
 def visualize_point_clouds_with_colorbar(las_dir, output_dir):
     """
     Generates 3D scatter plots for LAS files with a color bar for height and saves them.
@@ -317,7 +318,6 @@ def visualize_point_clouds_with_colorbar(las_dir, output_dir):
         ax.set_title(f"{plot_name}", y=0.85)
         ax.set_aspect("auto")
 
-        # Add color bar
         cbar = fig.colorbar(scatter, ax=ax, shrink=0.6, aspect=10)
         cbar.set_label("Height (Z-axis)", fontsize=12)
 
@@ -325,6 +325,7 @@ def visualize_point_clouds_with_colorbar(las_dir, output_dir):
         plt.savefig(save_path, bbox_inches="tight")
         plt.close()
         logger.info(f"Saved 3D plot for {plot_name} with color bar as {save_path}")
+
 
 def plot_field_density(df, columns, save_path):
     """
@@ -378,6 +379,7 @@ def normalize_cloud_height(las):
     out[:, 2] -= ground_level
     return out
 
+
 def preprocess_las_for_models(las_file, base_dir="./data/als_preprocessed", height_threshold=2.0, output_dir="./data/output"):
     """
     Preprocesses a LAS file for LMF and Point Transformer models and logs point statistics.
@@ -391,7 +393,6 @@ def preprocess_las_for_models(las_file, base_dir="./data/als_preprocessed", heig
     os.makedirs(base_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Initialize or append to the report
     report_file = os.path.join(output_dir, "preprocessing_report.csv")
     if not os.path.exists(report_file):
         with open(report_file, "w", newline="") as f:
@@ -408,13 +409,11 @@ def preprocess_las_for_models(las_file, base_dir="./data/als_preprocessed", heig
     ground_points = las.xyz[ground_mask]
     vegetation_points = normalized_points[~ground_mask]
 
-    # Log point counts
     total_points_before = len(vegetation_points)
     vegetation_points = vegetation_points[vegetation_points[:, 2] >= height_threshold]
     total_points_after = len(vegetation_points)
     points_removed = total_points_before - total_points_after
 
-    # Save preprocessed outputs
     las_name = os.path.basename(las_file).replace(".las", "")
     output_dir = os.path.join(base_dir, las_name)
     os.makedirs(output_dir, exist_ok=True)
@@ -429,11 +428,11 @@ def preprocess_las_for_models(las_file, base_dir="./data/als_preprocessed", heig
     np.save(ground_file, ground_points)
     logger.info(f"Saved ground points to {ground_file}")
 
-    # Append to the report
     with open(report_file, "a", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([las_name, total_points_before, total_points_after, points_removed])
     logger.info(f"Added report entry for {las_name}")
+
 
 # --- Main Workflow ---
 def process_data(data_dir, output_dir):
@@ -446,18 +445,14 @@ def process_data(data_dir, output_dir):
     """
     os.makedirs(output_dir, exist_ok=True)
 
-    # Load and inspect GeoJSON
     field_survey_path = os.path.join(data_dir, "field_survey.geojson")
     field_survey = gpd.read_file(field_survey_path)
     inspect_geojson_data(field_survey, output_dir)
     plot_geojson_species_map(field_survey, save_path=os.path.join(output_dir, "species_map.png"))
     
-    # Inspect all LAS files (detailed logs and JSON outputs)
     las_dir = os.path.join(data_dir, "als")
     detailed_output_dir = os.path.join(output_dir, "las_details")
     inspect_all_las_files(las_dir, detailed_output_dir)
-
-    # Aggregate statistics and save as CSV
     inspect_las_data(las_dir, save_path=output_dir)
 
     plot_tree_type_distribution_by_plot(
