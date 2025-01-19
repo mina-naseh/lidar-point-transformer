@@ -80,17 +80,34 @@ def visualize_point_cloud(data, predictions=None, title="Point Cloud", save_path
 
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
-    scatter = ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2], c=labels, cmap="coolwarm", label="Ground Truth", alpha=0.6)
 
+    # Plot ground truth
+    ax.scatter(
+        pos[labels == 1, 0], pos[labels == 1, 1], pos[labels == 1, 2], 
+        c='purple', label="Ground Truth (Trees)", alpha=0.6, s=2
+    )
+    ax.scatter(
+        pos[labels == 0, 0], pos[labels == 0, 1], pos[labels == 0, 2], 
+        c='blue', label="Ground Truth (Non-Trees)", alpha=0.6, s=2
+    )
+
+    # Plot predictions if provided
     if predictions is not None:
         preds = predictions.cpu().numpy()
-        ax.scatter(pos[:, 0], pos[:, 1], pos[:, 2], c=preds, cmap="viridis", label="Predictions", alpha=0.3)
+        ax.scatter(
+            pos[preds == 1, 0], pos[preds == 1, 1], pos[preds == 1, 2], 
+            c='yellow', label="Predictions (Trees)", alpha=0.3, s=1
+        )
+        ax.scatter(
+            pos[preds == 0, 0], pos[preds == 0, 1], pos[preds == 0, 2], 
+            c='cyan', label="Predictions (Non-Trees)", alpha=0.3, s=1
+        )
 
     ax.set_title(title)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
-    ax.legend()
+    ax.legend(loc="upper right", fontsize=10)
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path)

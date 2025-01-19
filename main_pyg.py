@@ -47,9 +47,9 @@ def main():
         test_data=test_data,
         in_channels=3,
         out_channels=1,
-        epochs=20,
+        epochs=30,
         batch_size=1,
-        lr=0.001
+        lr=0.01
     )
 
     logger.info(f"Saving the trained model to {model_path}...")
